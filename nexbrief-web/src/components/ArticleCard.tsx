@@ -47,8 +47,15 @@ export default function ArticleCard({ article }: ArticleCardProps) {
           {article.title}
         </h3>
 
-        {/* Date */}
-        <p className="text-xs text-gray-400">{formattedDate}</p>
+        {/* Date + pending badge — visible at a glance, no click needed */}
+        <div className="flex items-center gap-2">
+          <p className="text-xs text-gray-400">{formattedDate}</p>
+          {!isAiSummary && (
+            <span className="text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+              AI summary pending
+            </span>
+          )}
+        </div>
 
         {/* Summary accordion — real AI summary if ready, RSS description otherwise */}
         {summaryText && (
