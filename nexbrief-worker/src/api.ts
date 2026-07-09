@@ -31,8 +31,10 @@ export async function handleGetArticles(request: Request, env: Env): Promise<Res
   const page = Math.max(0, parseInt(params.get("page") ?? "0", 10) || 0);
   const size = Math.max(1, parseInt(params.get("size") ?? "100", 10) || 100);
 
+  // Every fetched article shows up immediately, even before its AI summary
+  // is ready — the frontend falls back to the RSS description in that case,
+  // rather than hiding real news behind Groq's rate limit.
   let articles = await loadArticles(env);
-  articles = articles.filter((a) => a.summary != null);
 
   if (keyword) {
     articles = articles.filter(

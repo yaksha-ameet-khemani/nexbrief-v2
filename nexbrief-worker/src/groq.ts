@@ -5,9 +5,14 @@ import type { Env } from "./types";
 
 export class RateLimitError extends Error {}
 
-function sleep(ms: number): Promise<void> {
+export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+// Pace between Groq calls so a run stays under the free-tier rate limit
+// instead of burning through it in the first few seconds. Matches the
+// 2-second pacing AiSummaryService used in the original Java backend.
+export const RATE_LIMIT_PACING_MS = 2000;
 
 async function callGroq(env: Env, body: unknown): Promise<string | null> {
   const res = await fetch(env.GROQ_API_URL, {

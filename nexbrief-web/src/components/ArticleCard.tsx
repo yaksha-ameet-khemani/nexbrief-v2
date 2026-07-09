@@ -18,6 +18,12 @@ export default function ArticleCard({ article }: ArticleCardProps) {
     },
   );
 
+  // AI summary isn't always ready yet (Groq's free-tier rate limit means it
+  // can lag an hour or two behind) — fall back to the RSS description so the
+  // article still shows up instead of being hidden until it's polished.
+  const isAiSummary = article.summary != null;
+  const summaryText = article.summary ?? article.description;
+
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden hover:shadow-md transition-shadow">
       {/* Thumbnail */}
@@ -44,19 +50,28 @@ export default function ArticleCard({ article }: ArticleCardProps) {
         {/* Date */}
         <p className="text-xs text-gray-400">{formattedDate}</p>
 
-        {/* Summary accordion */}
-        {article.summary && (
+        {/* Summary accordion — real AI summary if ready, RSS description otherwise */}
+        {summaryText && (
           <div>
             <button
               onClick={() => setShowSummary(!showSummary)}
               className="text-xs text-blue-500 font-medium hover:underline"
             >
-              {showSummary ? "Hide Summary ▲" : "Read Summary ▼"}
+              {showSummary
+                ? "Hide Summary ▲"
+                : isAiSummary
+                  ? "Read Summary ▼"
+                  : "Read Preview ▼"}
             </button>
             {showSummary && (
-              <p className="mt-2 text-xs text-gray-600 leading-relaxed bg-blue-50 rounded-lg p-3">
-                {article.summary}
-              </p>
+              <div className="mt-2 text-xs text-gray-600 leading-relaxed bg-blue-50 rounded-lg p-3">
+                {!isAiSummary && (
+                  <p className="text-blue-400 italic mb-1">
+                    AI summary pending — showing quick preview
+                  </p>
+                )}
+                <p>{summaryText}</p>
+              </div>
             )}
           </div>
         )}

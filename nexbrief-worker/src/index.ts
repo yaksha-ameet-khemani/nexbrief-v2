@@ -1,7 +1,7 @@
 import type { Article, Env } from "./types";
 import { fetchAllFeeds } from "./feeds";
 import { scrapeArticle, EXTRACTION_FAILED } from "./scrape";
-import { summarize, extractSearchQuery, buildLinks, RateLimitError } from "./groq";
+import { summarize, extractSearchQuery, buildLinks, RateLimitError, sleep, RATE_LIMIT_PACING_MS } from "./groq";
 import { loadArticles, saveArticles, existingUrlSet } from "./store";
 import { handleGetArticles, jsonResponse, corsPreflight, CORS_HEADERS } from "./api";
 
@@ -93,6 +93,7 @@ async function runPipeline(env: Env): Promise<void> {
       }
 
       if (summary) {
+        await sleep(RATE_LIMIT_PACING_MS); // pace the two Groq calls apart
         const query = await extractSearchQuery(env, raw.title, summary).catch((err) => {
           if (!(err instanceof RateLimitError)) {
             console.error(`SearchLink: Error | title=${raw.title} | ${(err as Error).message}`);
@@ -102,6 +103,8 @@ async function runPipeline(env: Env): Promise<void> {
         searchQuery = query;
         links = buildLinks(query ?? raw.title, raw.category);
       }
+
+      await sleep(RATE_LIMIT_PACING_MS); // pace before the next article's Groq calls
     }
 
     newArticles.push({
@@ -147,6 +150,7 @@ async function processBacklog(
       const summary = await summarize(env, article.rawContent!, article.language);
       if (summary) {
         article.summary = summary;
+        await sleep(RATE_LIMIT_PACING_MS); // pace the two Groq calls apart
         const query = await extractSearchQuery(env, article.title, summary).catch((err) => {
           if (!(err instanceof RateLimitError)) {
             console.error(`Phase 0 SearchLink: Error | title=${article.title} | ${(err as Error).message}`);
@@ -157,6 +161,8 @@ async function processBacklog(
         article.links = buildLinks(query ?? article.title, article.category);
         console.log(`Phase 0: Backlog summarized | source=${article.source} | title=${article.title}`);
       }
+
+      await sleep(RATE_LIMIT_PACING_MS); // pace before the next article's Groq calls
     } catch (err) {
       if (err instanceof RateLimitError) {
         console.warn(`Phase 0: Rate limit hit (429). Halting pipeline — ${pending.length} articles still pending.`);
