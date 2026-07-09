@@ -138,6 +138,11 @@ async function runPipeline(env: Env): Promise<void> {
       createdAt: new Date().toISOString(),
     });
 
+    // Save after every article, not just at the end — same reasoning as the
+    // Phase 0 backlog loop above: a killed background task shouldn't throw
+    // away already-completed work.
+    await saveArticles(env, [...articles, ...newArticles]);
+
     if (rateLimitedDuringNew) {
       console.warn("Phase 3: Rate limit hit (429). Stopping summarization for this run.");
       break;
@@ -145,7 +150,6 @@ async function runPipeline(env: Env): Promise<void> {
   }
 
   const merged = [...articles, ...newArticles];
-  await saveArticles(env, merged);
   await saveMeta(env, {
     lastRunAt: new Date().toISOString(),
     lastRunNewArticles: newRaw.length,
@@ -189,6 +193,14 @@ async function processBacklog(
         article.links = buildLinks(query ?? article.title, article.category);
         cleared++;
         console.log(`Phase 0: Backlog summarized | source=${article.source} | title=${article.title}`);
+
+        // Save immediately, per article. Cloudflare can (and did, in
+        // testing) kill a waitUntil-extended background task before it
+        // finishes — without an incremental save here, every article
+        // summarized in a run that gets cut off is silently thrown away,
+        // burning real Groq quota for nothing and leaving the article
+        // stuck "pending" forever despite having actually succeeded.
+        await saveArticles(env, articles);
       }
 
       await sleep(RATE_LIMIT_PACING_MS); // pace before the next article's Groq calls
