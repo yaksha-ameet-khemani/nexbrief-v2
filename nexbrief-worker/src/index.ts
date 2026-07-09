@@ -1,9 +1,17 @@
 import type { Article, Env } from "./types";
 import { fetchAllFeeds } from "./feeds";
 import { scrapeArticle, EXTRACTION_FAILED } from "./scrape";
-import { summarize, extractSearchQuery, buildLinks, RateLimitError, sleep, RATE_LIMIT_PACING_MS } from "./groq";
-import { loadArticles, saveArticles, existingUrlSet } from "./store";
-import { handleGetArticles, jsonResponse, corsPreflight, CORS_HEADERS } from "./api";
+import {
+  summarize,
+  extractSearchQuery,
+  buildLinks,
+  RateLimitError,
+  sleep,
+  RATE_LIMIT_PACING_MS,
+  getLastRateLimitInfo,
+} from "./groq";
+import { loadArticles, saveArticles, existingUrlSet, loadMeta, saveMeta } from "./store";
+import { handleGetArticles, handleGetStatus, jsonResponse, corsPreflight, CORS_HEADERS } from "./api";
 
 const BACKLOG_LIMIT = 20; // matches AiSummaryService.BACKLOG_LIMIT
 
@@ -17,6 +25,10 @@ export default {
 
     if (url.pathname === "/api/articles" && request.method === "GET") {
       return handleGetArticles(request, env);
+    }
+
+    if (url.pathname === "/api/status" && request.method === "GET") {
+      return handleGetStatus(env);
     }
 
     // Manual-trigger route so the pipeline can be exercised without waiting
@@ -52,6 +64,13 @@ async function runPipeline(env: Env): Promise<void> {
   articles = backlogResult.articles;
   if (backlogResult.rateLimited) {
     await saveArticles(env, articles);
+    await saveMeta(env, {
+      lastRunAt: new Date().toISOString(),
+      lastRunNewArticles: 0,
+      lastRunBacklogCleared: backlogResult.cleared,
+      lastRunRateLimited: true,
+      groqRateLimit: getLastRateLimitInfo(),
+    });
     console.warn("Pipeline halted: rate limit hit during backlog processing. Will retry on next run.");
     return;
   }
@@ -127,6 +146,13 @@ async function runPipeline(env: Env): Promise<void> {
 
   const merged = [...articles, ...newArticles];
   await saveArticles(env, merged);
+  await saveMeta(env, {
+    lastRunAt: new Date().toISOString(),
+    lastRunNewArticles: newRaw.length,
+    lastRunBacklogCleared: backlogResult.cleared,
+    lastRunRateLimited: rateLimitedDuringNew,
+    groqRateLimit: getLastRateLimitInfo(),
+  });
   console.log(
     `Pipeline completed. ${newArticles.length} new articles processed this run, ${merged.length} total in store.`,
   );
@@ -135,15 +161,17 @@ async function runPipeline(env: Env): Promise<void> {
 async function processBacklog(
   env: Env,
   articles: Article[],
-): Promise<{ articles: Article[]; rateLimited: boolean }> {
+): Promise<{ articles: Article[]; rateLimited: boolean; cleared: number }> {
   const pending = articles.filter((a) => a.rawContent && a.summary == null);
   if (pending.length === 0) {
     console.log("Phase 0: No backlog articles found.");
-    return { articles, rateLimited: false };
+    return { articles, rateLimited: false, cleared: 0 };
   }
 
   const backlog = pending.slice(0, BACKLOG_LIMIT);
   console.log(`Phase 0: ${pending.length} articles pending summary. Processing up to ${backlog.length} as backlog.`);
+
+  let cleared = 0;
 
   for (const article of backlog) {
     try {
@@ -159,6 +187,7 @@ async function processBacklog(
         });
         article.searchQuery = query;
         article.links = buildLinks(query ?? article.title, article.category);
+        cleared++;
         console.log(`Phase 0: Backlog summarized | source=${article.source} | title=${article.title}`);
       }
 
@@ -166,11 +195,11 @@ async function processBacklog(
     } catch (err) {
       if (err instanceof RateLimitError) {
         console.warn(`Phase 0: Rate limit hit (429). Halting pipeline — ${pending.length} articles still pending.`);
-        return { articles, rateLimited: true };
+        return { articles, rateLimited: true, cleared };
       }
       console.error(`Phase 0: Error | source=${article.source} | title=${article.title} | ${(err as Error).message}`);
     }
   }
 
-  return { articles, rateLimited: false };
+  return { articles, rateLimited: false, cleared };
 }

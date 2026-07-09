@@ -26,9 +26,17 @@ export default function Navbar({
   return (
     <nav className="bg-gray-900 text-white px-6 py-4 sticky top-0 z-50 shadow-lg">
       <div className="max-w-7xl mx-auto flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <h1 className="text-2xl font-bold tracking-tight text-white">
-          Nex<span className="text-blue-400">Brief</span>
-        </h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold tracking-tight text-white">
+            Nex<span className="text-blue-400">Brief</span>
+          </h1>
+          <a
+            href="/status"
+            className="text-xs px-3 py-1 rounded-full bg-gray-700 text-gray-300 hover:bg-gray-600 transition-colors"
+          >
+            Status
+          </a>
+        </div>
 
         <input
           type="date"

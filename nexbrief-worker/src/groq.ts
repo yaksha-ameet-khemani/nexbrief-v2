@@ -1,4 +1,4 @@
-import type { Env } from "./types";
+import type { Env, GroqRateLimitInfo } from "./types";
 
 // Ported from AiSummaryService.callGroq + SearchLinkService (NexBrief Spring
 // Boot backend) — same prompts, same params, same 3-attempt backoff.
@@ -14,6 +14,32 @@ export function sleep(ms: number): Promise<void> {
 // 2-second pacing AiSummaryService used in the original Java backend.
 export const RATE_LIMIT_PACING_MS = 2000;
 
+// Groq (OpenAI-compatible) returns x-ratelimit-* headers on every response,
+// success or not. Captured here per-call so the pipeline can persist the
+// latest snapshot to KV for the status page, without threading it through
+// every summarize()/extractSearchQuery() return value.
+let lastRateLimitInfo: GroqRateLimitInfo | null = null;
+
+export function getLastRateLimitInfo(): GroqRateLimitInfo | null {
+  return lastRateLimitInfo;
+}
+
+function captureRateLimitHeaders(res: Response): void {
+  const h = res.headers;
+  if (!h.get("x-ratelimit-limit-requests") && !h.get("x-ratelimit-remaining-requests")) {
+    return; // Groq didn't send rate-limit headers on this response, leave the last snapshot alone
+  }
+  lastRateLimitInfo = {
+    limitRequests: h.get("x-ratelimit-limit-requests"),
+    remainingRequests: h.get("x-ratelimit-remaining-requests"),
+    resetRequests: h.get("x-ratelimit-reset-requests"),
+    limitTokens: h.get("x-ratelimit-limit-tokens"),
+    remainingTokens: h.get("x-ratelimit-remaining-tokens"),
+    resetTokens: h.get("x-ratelimit-reset-tokens"),
+    capturedAt: new Date().toISOString(),
+  };
+}
+
 async function callGroq(env: Env, body: unknown): Promise<string | null> {
   const res = await fetch(env.GROQ_API_URL, {
     method: "POST",
@@ -23,6 +49,8 @@ async function callGroq(env: Env, body: unknown): Promise<string | null> {
     },
     body: JSON.stringify(body),
   });
+
+  captureRateLimitHeaders(res);
 
   if (res.status === 429) {
     throw new RateLimitError(`Groq rate limit (429)`);

@@ -1,6 +1,7 @@
-import type { Article, Env } from "./types";
+import type { Article, Env, PipelineMeta } from "./types";
 
 const KV_KEY = "articles";
+const META_KEY = "meta";
 const RETENTION_DAYS = 5; // keep a rolling window so the date-picker UI still has yesterday/day-before
 
 export async function loadArticles(env: Env): Promise<Article[]> {
@@ -23,4 +24,19 @@ export async function saveArticles(env: Env, articles: Article[]): Promise<void>
 
 export function existingUrlSet(articles: Article[]): Set<string> {
   return new Set(articles.map((a) => a.url));
+}
+
+export async function loadMeta(env: Env): Promise<PipelineMeta | null> {
+  const raw = await env.NEXBRIEF_KV.get(META_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as PipelineMeta;
+  } catch (err) {
+    console.error("store: failed to parse meta JSON", err);
+    return null;
+  }
+}
+
+export async function saveMeta(env: Env, meta: PipelineMeta): Promise<void> {
+  await env.NEXBRIEF_KV.put(META_KEY, JSON.stringify(meta));
 }

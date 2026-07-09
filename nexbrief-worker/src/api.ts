@@ -1,5 +1,5 @@
 import type { Article, Env, PageResponse } from "./types";
-import { loadArticles } from "./store";
+import { loadArticles, loadMeta } from "./store";
 
 export const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -68,4 +68,48 @@ export async function handleGetArticles(request: Request, env: Env): Promise<Res
   };
 
   return jsonResponse(response);
+}
+
+interface SourceStats {
+  total: number;
+  summarized: number;
+  pending: number;
+}
+
+// Powers the frontend's /status page: how many articles are fetched vs.
+// still waiting on an AI summary, when the pipeline last ran, whether it got
+// rate-limited, how much Groq quota is left (from the last captured response
+// headers), and when the next hourly cron run will fire.
+export async function handleGetStatus(env: Env): Promise<Response> {
+  const [articles, meta] = await Promise.all([loadArticles(env), loadMeta(env)]);
+
+  const summarized = articles.filter((a) => a.summary != null).length;
+  const pending = articles.length - summarized;
+
+  const bySource: Record<string, SourceStats> = {};
+  for (const a of articles) {
+    const stats = (bySource[a.source] ??= { total: 0, summarized: 0, pending: 0 });
+    stats.total++;
+    if (a.summary != null) stats.summarized++;
+    else stats.pending++;
+  }
+
+  const now = new Date();
+  const nextRunAt = new Date(now);
+  nextRunAt.setUTCMinutes(0, 0, 0);
+  nextRunAt.setUTCHours(nextRunAt.getUTCHours() + 1);
+
+  return jsonResponse({
+    serverTime: now.toISOString(),
+    nextRunAt: nextRunAt.toISOString(),
+    totalArticles: articles.length,
+    summarized,
+    pending,
+    bySource,
+    lastRunAt: meta?.lastRunAt ?? null,
+    lastRunNewArticles: meta?.lastRunNewArticles ?? null,
+    lastRunBacklogCleared: meta?.lastRunBacklogCleared ?? null,
+    lastRunRateLimited: meta?.lastRunRateLimited ?? null,
+    groqRateLimit: meta?.groqRateLimit ?? null,
+  });
 }

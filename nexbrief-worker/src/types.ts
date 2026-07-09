@@ -30,6 +30,24 @@ export interface PageResponse<T> {
   size: number;
 }
 
+export interface GroqRateLimitInfo {
+  limitRequests: string | null;
+  remainingRequests: string | null;
+  resetRequests: string | null;
+  limitTokens: string | null;
+  remainingTokens: string | null;
+  resetTokens: string | null;
+  capturedAt: string; // ISO 8601
+}
+
+export interface PipelineMeta {
+  lastRunAt: string; // ISO 8601
+  lastRunNewArticles: number;
+  lastRunBacklogCleared: number;
+  lastRunRateLimited: boolean;
+  groqRateLimit: GroqRateLimitInfo | null;
+}
+
 export interface Env {
   NEXBRIEF_KV: KVNamespace;
   GROQ_API_KEY: string;
