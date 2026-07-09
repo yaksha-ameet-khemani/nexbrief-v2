@@ -76,6 +76,13 @@ interface SourceStats {
   pending: number;
 }
 
+interface PendingArticleSummary {
+  title: string;
+  source: string;
+  url: string;
+  publishedAt: string;
+}
+
 // Powers the frontend's /status page: how many articles are fetched vs.
 // still waiting on an AI summary, when the pipeline last ran, whether it got
 // rate-limited, how much Groq quota is left (from the last captured response
@@ -94,6 +101,11 @@ export async function handleGetStatus(env: Env): Promise<Response> {
     else stats.pending++;
   }
 
+  const pendingArticles: PendingArticleSummary[] = articles
+    .filter((a) => a.summary == null)
+    .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
+    .map((a) => ({ title: a.title, source: a.source, url: a.url, publishedAt: a.publishedAt }));
+
   const now = new Date();
   const nextRunAt = new Date(now);
   nextRunAt.setUTCMinutes(0, 0, 0);
@@ -106,6 +118,7 @@ export async function handleGetStatus(env: Env): Promise<Response> {
     summarized,
     pending,
     bySource,
+    pendingArticles,
     lastRunAt: meta?.lastRunAt ?? null,
     lastRunNewArticles: meta?.lastRunNewArticles ?? null,
     lastRunBacklogCleared: meta?.lastRunBacklogCleared ?? null,
