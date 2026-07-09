@@ -1,0 +1,20 @@
+name = "nexbrief-worker"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[triggers]
+# Runs the fetch -> scrape -> summarize pipeline once an hour.
+crons = ["0 * * * *"]
+
+[[kv_namespaces]]
+binding = "NEXBRIEF_KV"
+id = "ce815ca8206e461bb0f2202807a17546"
+
+[vars]
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_API_MODEL = "llama-3.3-70b-versatile"
+
+# Secrets (never stored in this file — set via `wrangler secret put <NAME>`):
+#   GROQ_API_KEY     - Groq API key
+#   REFRESH_SECRET   - shared secret required to hit POST /api/refresh for manual testing

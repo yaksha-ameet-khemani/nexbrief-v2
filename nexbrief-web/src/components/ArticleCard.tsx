@@ -1,0 +1,110 @@
+import { useState } from "react";
+import type { Article } from "../types/Article";
+
+interface ArticleCardProps {
+  article: Article;
+}
+
+export default function ArticleCard({ article }: ArticleCardProps) {
+  const [showSummary, setShowSummary] = useState(false);
+  const [showLinks, setShowLinks] = useState(false);
+
+  const formattedDate = new Date(article.publishedAt).toLocaleDateString(
+    "en-IN",
+    {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    },
+  );
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden hover:shadow-md transition-shadow">
+      {/* Thumbnail */}
+      {article.thumbnailUrl ? (
+        <img
+          src={article.thumbnailUrl}
+          alt={article.title}
+          className="w-full h-44 object-cover"
+          onError={(e) => (e.currentTarget.style.display = "none")}
+        />
+      ) : (
+        <div className="w-full h-44 bg-gray-100 flex items-center justify-center text-gray-400 text-sm">
+          No Image
+        </div>
+      )}
+
+      {/* Content */}
+      <div className="p-4 flex flex-col gap-3">
+        {/* Title */}
+        <h3 className="text-sm font-semibold text-gray-800 leading-snug line-clamp-2">
+          {article.title}
+        </h3>
+
+        {/* Date */}
+        <p className="text-xs text-gray-400">{formattedDate}</p>
+
+        {/* Summary accordion */}
+        {article.summary && (
+          <div>
+            <button
+              onClick={() => setShowSummary(!showSummary)}
+              className="text-xs text-blue-500 font-medium hover:underline"
+            >
+              {showSummary ? "Hide Summary ▲" : "Read Summary ▼"}
+            </button>
+            {showSummary && (
+              <p className="mt-2 text-xs text-gray-600 leading-relaxed bg-blue-50 rounded-lg p-3">
+                {article.summary}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Search Web — links are precomputed server-side, so this is instant */}
+        {article.links && Object.keys(article.links).length > 0 && (
+          <div>
+            <button
+              onClick={() => setShowLinks(!showLinks)}
+              className="text-xs text-purple-500 font-medium hover:underline text-left"
+            >
+              {showLinks ? "Hide Search Links ▲" : "Search Web ▼"}
+            </button>
+            {showLinks && (
+              <div className="flex flex-col gap-1 mt-2">
+                {article.searchQuery && (
+                  <p className="text-xs text-gray-500 italic mb-1">
+                    "{article.searchQuery}"
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(article.links).map(([label, url]) => (
+                    <a
+                      key={label}
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-700 hover:bg-purple-100 hover:text-purple-700 transition-colors"
+                    >
+                      {label}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Read full article */}
+        <a
+          href={article.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs text-center bg-gray-900 text-white rounded-lg py-2 hover:bg-gray-700 transition-colors"
+        >
+          Read Full Article →
+        </a>
+      </div>
+    </div>
+  );
+}
