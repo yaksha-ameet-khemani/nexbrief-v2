@@ -7,13 +7,14 @@ import ArticleCard from "../components/ArticleCard";
 
 const SOURCES = ["espncricinfo", "bhaskar", "autocarindia", "gadgets360", "bbc"];
 
-const todayStr = new Date().toISOString().split("T")[0];
-
 export default function Home() {
   const [articles, setArticles] = useState<Article[]>([]);
   const [keyword, setKeyword] = useState("");
   const [selectedCategory, setCategory] = useState("");
-  const [selectedDate, setDate] = useState(todayStr);
+  // Empty by default = show everything currently cached (the KV store only
+  // ever retains ~5 days anyway), not just today. The date picker is an
+  // opt-in filter, not a default constraint.
+  const [selectedDate, setDate] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -25,7 +26,7 @@ export default function Home() {
         keyword: keyword || undefined,
         category: selectedCategory || undefined,
         date: selectedDate || undefined,
-        size: 100,
+        size: 300,
       });
       setArticles(data.content);
     } catch {
@@ -63,7 +64,7 @@ export default function Home() {
         {error && <p className="text-center text-red-400 py-20">{error}</p>}
         {!loading && !error && articles.length === 0 && (
           <p className="text-center text-gray-400 py-20">
-            No articles found for this date.
+            {selectedDate ? "No articles found for this date." : "No articles found."}
           </p>
         )}
         {!loading &&

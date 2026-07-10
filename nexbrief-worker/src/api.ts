@@ -18,15 +18,11 @@ export function corsPreflight(): Response {
   return new Response(null, { status: 204, headers: CORS_HEADERS });
 }
 
-// Keyword search intentionally searches all 5 days of retained history,
-// ignoring the date filter — a search box that only searches "today" would
-// be surprising. Source/category, on the other hand, combine with the date
-// filter (which the frontend always sends, defaulting to today) rather than
-// replacing it — otherwise picking a category silently drops the date scope
-// and shows every article of that category across the whole retention
-// window, while the unfiltered "All" view stays correctly scoped to just
-// today. That mismatch was a real bug: it made "All" and "Cricket" show
-// wildly different amounts of content for no reason a user could see.
+// By default, every filter combines with every other active filter, and
+// with no date param at all the result is everything currently in the KV
+// store (which only ever retains ~5 days anyway) — not just today. The date
+// filter is opt-in: pass a specific date to narrow down to just that day,
+// on top of whatever source/category/keyword is also active.
 export async function handleGetArticles(request: Request, env: Env): Promise<Response> {
   const params = new URL(request.url).searchParams;
 
@@ -48,12 +44,10 @@ export async function handleGetArticles(request: Request, env: Env): Promise<Res
         a.title.toLowerCase().includes(keyword) ||
         (a.description?.toLowerCase().includes(keyword) ?? false),
     );
-  } else {
-    if (source) articles = articles.filter((a) => a.source === source);
-    if (category) articles = articles.filter((a) => a.category === category);
-    const filterDate = date ?? new Date().toISOString().split("T")[0];
-    articles = articles.filter((a) => a.publishedAt.startsWith(filterDate));
   }
+  if (source) articles = articles.filter((a) => a.source === source);
+  if (category) articles = articles.filter((a) => a.category === category);
+  if (date) articles = articles.filter((a) => a.publishedAt.startsWith(date));
 
   articles = [...articles].sort(
     (a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime(),
