@@ -15,6 +15,33 @@ import { handleGetArticles, handleGetStatus, jsonResponse, corsPreflight, CORS_H
 
 const BACKLOG_LIMIT = 20; // matches AiSummaryService.BACKLOG_LIMIT
 
+// Groq's rate limit (or Cloudflare's waitUntil time limit) means a run often
+// can't get through every article it found — whatever hasn't been reached
+// yet when that happens just doesn't get processed this run. Articles were
+// previously ordered strictly source-by-source (all of espncricinfo, then
+// all of bhaskar, ...), so a source late in that order could get starved
+// indefinitely if earlier sources kept generating enough new articles to
+// eat the whole budget first — observed directly with a freshly-added
+// source (BBC Urdu, last in the list) never getting reached across several
+// runs. Interleaving round-robin across sources means every source gets a
+// turn early in each run, regardless of list position.
+function interleaveBySource<T extends { source: string }>(items: T[]): T[] {
+  const bySource = new Map<string, T[]>();
+  for (const item of items) {
+    const list = bySource.get(item.source);
+    if (list) list.push(item);
+    else bySource.set(item.source, [item]);
+  }
+  const groups = [...bySource.values()];
+  const result: T[] = [];
+  for (let i = 0; result.length < items.length; i++) {
+    for (const group of groups) {
+      if (i < group.length) result.push(group[i]);
+    }
+  }
+  return result;
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -78,7 +105,7 @@ async function runPipeline(env: Env): Promise<void> {
 
   console.log("Phase 1: Fetching RSS...");
   const existingUrls = existingUrlSet(articles);
-  const newRaw = await fetchAllFeeds(existingUrls);
+  const newRaw = interleaveBySource(await fetchAllFeeds(existingUrls));
   console.log(`Phase 1: Completed. ${newRaw.length} new articles found.`);
 
   console.log("Phase 2 + 3: Extracting content and summarizing new articles...");
@@ -172,7 +199,7 @@ async function processBacklog(
     return { articles, rateLimited: false, cleared: 0 };
   }
 
-  const backlog = pending.slice(0, BACKLOG_LIMIT);
+  const backlog = interleaveBySource(pending).slice(0, BACKLOG_LIMIT);
   console.log(`Phase 0: ${pending.length} articles pending summary. Processing up to ${backlog.length} as backlog.`);
 
   let cleared = 0;
