@@ -1,6 +1,6 @@
 # NexBrief-v2 — Status
 
-Last updated: 2026-07-10
+Last updated: 2026-07-10 (session paused here — see "Open question" below)
 
 ## What this is
 
@@ -24,12 +24,12 @@ architecture plan agreed before building.
 ## Architecture
 
 - `nexbrief-worker/` — Cloudflare Worker (TypeScript). Runs an hourly Cron
-  Trigger (`0 * * * *`) that: fetches RSS from 5 sources (ESPNCricinfo,
-  Dainik Bhaskar, Autocar India, Gadgets360, BBC) → scrapes full article text
-  via `HTMLRewriter` → summarizes via Groq (`llama-3.3-70b-versatile`) →
-  generates a search query + category-specific search links → stores
-  everything as one JSON blob in Workers KV (no database). Also serves the
-  read API and a manual-trigger test route.
+  Trigger (`0 * * * *`) that: fetches RSS from 6 sources (ESPNCricinfo,
+  Dainik Bhaskar, Autocar India, Gadgets360, BBC, BBC Urdu) → scrapes full
+  article text via `HTMLRewriter` → summarizes via Groq
+  (`llama-3.3-70b-versatile`) → generates a search query + category-specific
+  search links → stores everything as one JSON blob in Workers KV (no
+  database). Also serves the read API and a manual-trigger test route.
 - `nexbrief-web/` — Fresh Vite + React 19 + TypeScript + Tailwind frontend.
   Fetches from the Worker's API. Includes a `/status` page showing pipeline
   health (article counts, last/next run, Groq quota, and the actual titles
@@ -93,6 +93,39 @@ architecture plan agreed before building.
   nothing selected, every filter (keyword/source/category/date) is
   independent and combines freely, and no date filter at all means "show
   everything in the retention window."
+- **BBC Urdu added as a 6th source** (`feeds.bbci.co.uk/urdu/rss.xml`,
+  source key `bbcurdu`, category `general`, language `ur`). Its article
+  pages use a different template than BBC's English site (no `<article>`
+  tag, no `data-component` attributes) — verified by inspecting real page
+  HTML, the body is plain `<p>` tags inside `<main>`. Not blocked by
+  Cloudflare's IP ranges (unlike ESPNCricinfo/Gadgets360). Groq summarization
+  now also has an explicit Urdu instruction (previously only Hindi was
+  special-cased; everything else defaulted to English).
+- **New articles are processed round-robin across sources, not
+  source-by-source.** A run rarely gets through every article it finds
+  before hitting Groq's rate limit or Cloudflare's `waitUntil` time limit,
+  and previously articles were processed strictly in source order (all of
+  espncricinfo, then all of bhaskar, ...) — so a source late in that list
+  (BBC Urdu, added last) could get starved indefinitely: it found 5 new
+  articles every run but never actually got scraped/saved across several
+  consecutive runs because earlier sources kept consuming the whole
+  per-run budget first. Fixed by interleaving one article from each source
+  before processing (applied to both the new-article loop and the Phase 0
+  backlog-retry loop), so every source gets an early turn each run
+  regardless of its position in the source list.
+
+## Open question (pause point — 2026-07-10)
+
+User asked whether to additionally cap how many articles *per source* are
+kept in storage at once, since cricket (espncricinfo) naturally accumulates
+far more total articles over time than slower-moving sources like Autocar
+India — not because of unfair processing (fetching has always been a strict
+5-per-source-per-run cap, and processing is now round-robin/fair), but
+because cricket's RSS feed simply produces more *distinct new* articles per
+hour than other sources do, so its share of the ~5-day retention window
+grows faster. This is a different, additional design decision from the
+round-robin processing fix (which addresses fairness *within* a run, not
+long-term storage balance) — not yet decided, pick this up next session.
 
 ## Known limitations
 
