@@ -82,9 +82,14 @@ async function callGroqWithRetry(env: Env, body: unknown, maxRetries = 3): Promi
   return null;
 }
 
+const LANGUAGE_INSTRUCTIONS: Record<string, string> = {
+  hi: "Respond in Hindi.",
+  ur: "Respond in Urdu.",
+};
+
 export async function summarize(env: Env, content: string, language: string): Promise<string | null> {
   const trimmed = content.length > 3000 ? content.slice(0, 3000) : content;
-  const langInstruction = language === "hi" ? "Respond in Hindi." : "Respond in English.";
+  const langInstruction = LANGUAGE_INSTRUCTIONS[language] ?? "Respond in English.";
 
   const body = {
     model: env.GROQ_API_MODEL,

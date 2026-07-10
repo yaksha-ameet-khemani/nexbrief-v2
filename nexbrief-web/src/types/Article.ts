@@ -28,6 +28,7 @@ export const SOURCE_LABELS: Record<string, string> = {
   autocarindia: "Autocar India",
   gadgets360: "Gadgets360",
   bbc: "BBC News",
+  bbcurdu: "BBC Urdu",
 };
 
 export const CATEGORIES = ["cricket", "automobile", "technology", "general"];

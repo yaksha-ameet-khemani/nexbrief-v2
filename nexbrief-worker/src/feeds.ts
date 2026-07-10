@@ -33,6 +33,11 @@ export const RSS_FEEDS: Record<
     category: "general",
     language: "en",
   },
+  "https://feeds.bbci.co.uk/urdu/rss.xml": {
+    source: "bbcurdu",
+    category: "general",
+    language: "ur",
+  },
 };
 
 const parser = new XMLParser({

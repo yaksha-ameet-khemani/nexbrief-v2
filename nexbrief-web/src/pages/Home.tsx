@@ -5,7 +5,7 @@ import Navbar from "../components/Navbar";
 import SourceSection from "../components/SourceSection";
 import ArticleCard from "../components/ArticleCard";
 
-const SOURCES = ["espncricinfo", "bhaskar", "autocarindia", "gadgets360", "bbc"];
+const SOURCES = ["espncricinfo", "bhaskar", "autocarindia", "gadgets360", "bbc", "bbcurdu"];
 
 export default function Home() {
   const [articles, setArticles] = useState<Article[]>([]);

@@ -8,6 +8,11 @@ export const SOURCE_SELECTORS: Record<string, string[]> = {
   autocarindia: ["div.article-body", "div[class*='ArticleBody']"],
   gadgets360: ["div[class*='article__details']", "div[itemprop='articleBody']"],
   bbc: ["article", "div[data-component='text-block']"],
+  // BBC Urdu's page template has no <article> tag and no data-component
+  // attributes (a different rendering system than BBC's English site) — the
+  // article body is just plain <p> tags inside <main>, verified by
+  // inspecting a real page's HTML rather than guessing.
+  bbcurdu: ["main p"],
 };
 
 const FALLBACK_SELECTORS = ["article", "main", "div[class*='content']", "div[class*='body']"];
