@@ -18,9 +18,15 @@ export function corsPreflight(): Response {
   return new Response(null, { status: 204, headers: CORS_HEADERS });
 }
 
-// Mirrors ArticleService.getArticles(source, category, keyword, date, page, size):
-// keyword takes priority, then source, then category, then a date filter that
-// defaults to "today" when nothing else was passed.
+// Keyword search intentionally searches all 5 days of retained history,
+// ignoring the date filter — a search box that only searches "today" would
+// be surprising. Source/category, on the other hand, combine with the date
+// filter (which the frontend always sends, defaulting to today) rather than
+// replacing it — otherwise picking a category silently drops the date scope
+// and shows every article of that category across the whole retention
+// window, while the unfiltered "All" view stays correctly scoped to just
+// today. That mismatch was a real bug: it made "All" and "Cricket" show
+// wildly different amounts of content for no reason a user could see.
 export async function handleGetArticles(request: Request, env: Env): Promise<Response> {
   const params = new URL(request.url).searchParams;
 
@@ -42,11 +48,9 @@ export async function handleGetArticles(request: Request, env: Env): Promise<Res
         a.title.toLowerCase().includes(keyword) ||
         (a.description?.toLowerCase().includes(keyword) ?? false),
     );
-  } else if (source) {
-    articles = articles.filter((a) => a.source === source);
-  } else if (category) {
-    articles = articles.filter((a) => a.category === category);
   } else {
+    if (source) articles = articles.filter((a) => a.source === source);
+    if (category) articles = articles.filter((a) => a.category === category);
     const filterDate = date ?? new Date().toISOString().split("T")[0];
     articles = articles.filter((a) => a.publishedAt.startsWith(filterDate));
   }
