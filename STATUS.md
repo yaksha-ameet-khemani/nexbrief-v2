@@ -1,6 +1,6 @@
 # NexBrief-v2 — Status
 
-Last updated: 2026-07-09
+Last updated: 2026-07-10
 
 ## What this is
 
@@ -32,7 +32,9 @@ architecture plan agreed before building.
   read API and a manual-trigger test route.
 - `nexbrief-web/` — Fresh Vite + React 19 + TypeScript + Tailwind frontend.
   Fetches from the Worker's API. Includes a `/status` page showing pipeline
-  health.
+  health (article counts, last/next run, Groq quota, and the actual titles
+  of currently-pending articles), which auto-refreshes every 30s and
+  live-ticks its countdown/timestamps rather than freezing at page-load.
 
 ## Deployment (all free tier, all automatic)
 
@@ -67,15 +69,20 @@ architecture plan agreed before building.
   originally an article was hidden from the API until summarized, which
   meant Groq's free-tier rate limit could hide real news for up to an hour.
   Now `/api/articles` returns every fetched article; the frontend falls back
-  to the RSS description (labeled "Read Preview") until the real AI summary
-  lands, then it upgrades in place.
+  to the RSS description (labeled "Read Preview", with a visible amber
+  "AI summary pending" badge on the card itself, not just hidden inside the
+  expandable accordion) until the real AI summary lands, then it upgrades
+  in place.
 - **2-second pacing between Groq calls** (re-added after being dropped
   during the port from the original Java `AiSummaryService`) so each hourly
   run clears more of the backlog before hitting Groq's rate limit.
+- **Every article is saved to KV immediately after it's processed**, not
+  batched up and saved once at the end of a run. This was a real bug fix,
+  not just a preference — see "Known limitations" below.
 - **`/api/status`** reports total/summarized/pending article counts (overall
-  and per source), last run time + outcome, next scheduled run time, and
-  Groq's remaining request/token quota (captured from the last API response's
-  rate-limit headers).
+  and per source), the actual titles of pending articles, last run time +
+  outcome, next scheduled run time, and Groq's remaining request/token quota
+  (captured from the last API response's rate-limit headers).
 
 ## Known limitations
 
@@ -87,6 +94,19 @@ architecture plan agreed before building.
   initial 25-article bootstrap burst) can take a couple of hours to fully
   get AI summaries, via the Phase 0 backlog-retry mechanism on subsequent
   hourly runs. Articles are never hidden while waiting (see above).
+- **(Fixed) Cloudflare was killing background pipeline runs before they
+  finished, and it was silently discarding completed work, not Groq's rate
+  limit.** `ctx.waitUntil()` — how the pipeline keeps running after the
+  `/api/refresh` HTTP response is sent — has a limited execution window;
+  Cloudflare cancels it if it runs past that. Confirmed live via
+  `wrangler tail`: a run successfully summarized 6 of 8 pending articles,
+  logged every one, then got killed by "waitUntil() tasks did not complete
+  within the allowed time" before the code ever reached the save step —
+  so all 6 (and the Groq quota spent producing them) were thrown away, and
+  the article stayed stuck "pending" indefinitely despite clearly having
+  enough Groq quota. Fixed by saving to KV immediately after each article
+  instead of batching the save until the end of the run — a cut-off run now
+  keeps whatever it finished instead of losing all of it.
 - No visual/browser UI testing was done by Claude directly (no browser tool
   available in that environment) — verified via curl/API responses and the
   user checking the live site themselves.

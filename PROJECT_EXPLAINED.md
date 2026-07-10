@@ -2,7 +2,7 @@
 
 *A detailed walkthrough of what this project is, why every technology in it was chosen, how the pieces fit together, and the real problems we ran into while building it. Written so that someone with little to no experience in web development or cloud infrastructure can read it top to bottom and actually understand — not just copy — what happened here.*
 
-Last updated: 2026-07-09
+Last updated: 2026-07-10
 
 ---
 
@@ -292,7 +292,11 @@ The original Java backend deliberately waited 2 seconds between each AI call, sp
 
 ### 7.5 A visible status page
 
-Once the pipeline had several moving, sometimes-invisible parts (a backlog, a rate limit, a schedule), it became clear that "is everything working?" needed to be answerable at a glance rather than by reading server logs. The `/status` page exposes exactly that: how many articles exist, how many have real AI summaries vs. are still waiting, when the pipeline last ran and whether it hit a rate limit, when it'll run next, and how much of Groq's quota is left (Groq helpfully includes this information in its API response headers, which we started capturing and displaying).
+Once the pipeline had several moving, sometimes-invisible parts (a backlog, a rate limit, a schedule), it became clear that "is everything working?" needed to be answerable at a glance rather than by reading server logs. The `/status` page exposes exactly that: how many articles exist, how many have real AI summaries vs. are still waiting (plus the actual titles of the pending ones, not just a count), when the pipeline last ran and whether it hit a rate limit, when it'll run next, and how much of Groq's quota is left (Groq helpfully includes this information in its API response headers, which we started capturing and displaying). It also auto-refreshes and live-ticks its own countdown/timestamps every second, rather than freezing at whatever it looked like the moment the page loaded — an early version didn't do this, and looked broken simply because it never updated itself (see [Problem 8.9](#89-a-background-task-was-silently-getting-killed-and-throwing-away-completed-work)).
+
+### 7.6 Save progress incrementally, not all at once at the end
+
+The pipeline originally only wrote its results to storage once, right at the very end of a run. This turned out to be a real bug, not just a stylistic choice — see [Problem 8.9](#89-a-background-task-was-silently-getting-killed-and-throwing-away-completed-work) for the full story. Now every single article is saved immediately after it's processed, in both the backlog-retry loop and the new-article loop. The cost is more individual write operations (still trivially within the free tier's limits at this project's scale); the benefit is that a run that gets interrupted for any reason keeps whatever work it actually finished, instead of losing everything back to the last checkpoint.
 
 ---
 
@@ -332,12 +336,23 @@ During testing, ESPNCricinfo and Gadgets360 both returned an outright `403 Forbi
 
 The original Java backend explicitly waited 2 seconds between each AI API call specifically to avoid triggering Groq's rate limit too quickly. This detail didn't make it into the initial TypeScript rewrite. The bug wasn't caught by code review or type-checking — TypeScript happily confirms code is internally consistent, but it has no way of knowing an external service enforces a *timing* rule that the code doesn't respect. It was only caught by actually running the real pipeline against the live Groq API and watching, in real time via live server logs, exactly when and why it got cut off early. **Lesson**: some classes of bugs (timing, rate limits, external service behavior) are invisible to static analysis and type checking entirely — they only show up by actually running the system against the real, live external world and observing what happens, which is why testing against production-like conditions matters even when everything "looks correct" on paper.
 
+### 8.9 A background task was silently getting killed, and throwing away completed work
+
+A batch of articles kept staying "pending" run after run, even though the status page showed Groq still had plenty of quota left (hundreds of requests and thousands of tokens remaining) — which didn't add up. The first instinct was that this had to still be some Groq rate-limit edge case; it wasn't. Watching a real, manually-triggered run through `wrangler tail` (Cloudflare's live log-streaming command) showed exactly what was happening: the pipeline successfully summarized 6 out of 8 pending articles — each one logged as a success — and then this line appeared: `waitUntil() tasks did not complete within the allowed time after invocation end and have been cancelled`.
+
+Here's the mechanism: when the manual "refresh" endpoint is called, the Worker immediately sends back an HTTP response ("refresh started") so the person calling it isn't left waiting, and keeps the actual pipeline running afterward via `ctx.waitUntil(...)` — a Cloudflare API specifically for "keep this work going a bit after the response is sent." But that extension has a limited time budget, and once it runs out, Cloudflare simply cancels whatever's still in progress — no error thrown to catch, no graceful shutdown, it just stops. The pipeline code only saved its results to storage once, at the very end of the entire run — so when it got cancelled partway through, none of that run's 6 successfully-summarized articles were ever written down anywhere. They were correctly summarized, that work genuinely happened and genuinely cost real Groq API quota, and then it was thrown away completely, as if it had never happened. The next run would find the exact same 8 (now sometimes fewer, sometimes the same) articles still pending, with no way to tell from the outside that real work was happening and just quietly evaporating.
+
+The fix: save each article to storage *immediately* after it's processed, not batched up for one save at the end. Now if a run gets cancelled partway through, everything up to that point is already safely stored — worst case, only the one article that was mid-save at the exact moment of cancellation might need redoing, not the entire batch. Verified by deliberately re-running the same scenario and watching the pending count actually drop (8 → 3) instead of staying frozen.
+
+**Lesson**: "the operation finished successfully" and "the result was saved" are two different claims, and code that only makes the second claim true at the very end of a long process is fragile — anything that can interrupt execution partway through (a crash, a timeout, a killed background task, a deployment happening mid-run) turns completed, valid work into work that never happened at all, from the system's point of view. Saving incrementally, as progress is actually made, is a broadly useful pattern for anything long-running and interruptible — not just this specific Cloudflare quirk. It's also a good example of why "the numbers on a dashboard don't add up" is worth actually investigating with real logs rather than guessing at an explanation that merely sounds plausible.
+
 ---
 
 ## 9. Glossary — Terms Explained Simply
 
 - **API (Application Programming Interface)**: A defined way for one piece of software to ask another piece of software to do something or hand back data — e.g., "give me the current weather" — usually over the internet using HTTP.
 - **API key**: A secret password-like string that identifies who's making a request to an API, so the provider knows who to bill or restrict.
+- **Background task (`waitUntil`)**: Work a serverless function keeps doing *after* it has already sent back its response, instead of making whoever's waiting sit through the whole thing. Cloudflare Workers offer this via `ctx.waitUntil(...)`, but it comes with a limited extra time budget — if the background work doesn't finish before that runs out, the platform cancels it outright, with no error to catch. See [Problem 8.9](#89-a-background-task-was-silently-getting-killed-and-throwing-away-completed-work).
 - **CORS (Cross-Origin Resource Sharing)**: A browser security rule blocking a webpage from freely making requests to a different website's server unless that server explicitly allows it. See [Section 3.1](#31-cors-blocks-a-browser-from-fetching-most-other-websites-data).
 - **Cron job / Cron trigger**: A way of scheduling code to run automatically at specific times or intervals, without a person manually starting it.
 - **CSS selector**: A pattern used to identify specific elements on a webpage (e.g., "the `<div>` with class `article-body`"), used both for styling and, here, for extracting specific content while scraping.
@@ -366,6 +381,8 @@ The original Java backend explicitly waited 2 seconds between each AI API call s
 - **Type-checking and code review can't catch everything** — timing-sensitive behavior and how external services actually behave under load can only be discovered by really running the system and watching it happen, which is why testing against real conditions (even manually, even once) matters.
 - **Secrets (API keys, tokens, passwords) should never be pasted into a chat log, committed to a repository, or embedded in frontend code** — they should be entered directly into the tool that needs them (a terminal prompt, a platform's dedicated "secrets" UI), kept out of any place that might be logged, screenshotted, or shared.
 - **Automating deployment (so pushing code automatically makes it live) removes an entire category of "I forgot to redeploy" mistakes** — investing a small amount of time in CI/CD (Continuous Integration/Continuous Deployment, i.e. automated build-and-deploy pipelines) pays off very quickly even on a small personal project.
+- **"It ran successfully" and "the result was saved" are not the same claim** — any code that does a batch of work and only persists the results at the very end is one crash, timeout, or cancellation away from throwing all of it away, even work that completed correctly. Saving progress incrementally, as it actually happens, is a cheap and broadly useful habit for anything long-running (see [Problem 8.9](#89-a-background-task-was-silently-getting-killed-and-throwing-away-completed-work)).
+- **When numbers on a dashboard don't logically add up, that's worth actually investigating with real logs, not explaining away with the first plausible-sounding guess** — the instinct here was "must still be the Groq rate limit," and the real cause turned out to be something else entirely that only became obvious by watching live execution logs.
 
 ---
 

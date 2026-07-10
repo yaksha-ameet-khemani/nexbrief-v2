@@ -163,7 +163,7 @@ Returns a paginated list of articles.
 
 ### `GET /api/status`
 
-Returns pipeline health: article counts (total/summarized/pending, overall and per-source), last/next run time, whether the last run hit a rate limit, and Groq's remaining quota.
+Returns pipeline health: article counts (total/summarized/pending, overall and per-source), the titles of currently-pending articles, last/next run time, whether the last run hit a rate limit, and Groq's remaining quota. Powers the `/status` page, which auto-refreshes every 30s.
 
 ### `POST /api/refresh`
 
@@ -173,6 +173,7 @@ Manually triggers the fetch/scrape/summarize pipeline immediately, instead of wa
 
 - ESPNCricinfo and Gadgets360 block scraping requests from Cloudflare's IP ranges (403 responses) — worked around by falling back to the RSS description for AI summarization on those sources.
 - Groq's free-tier rate limit means a large batch of new articles can take a couple of hours to all get real AI summaries (via automatic backlog retry on subsequent hourly runs) — articles are never hidden while waiting, they show with a "preview" (RSS description) in the meantime.
+- A background-task time limit was silently discarding completed work on interrupted runs — fixed by saving each article immediately instead of batching the save until the end.
 
 See [`STATUS.md`](./STATUS.md#known-limitations) for the current, up-to-date list.
 
