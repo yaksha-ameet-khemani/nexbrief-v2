@@ -150,14 +150,14 @@ All endpoints are served by `nexbrief-worker`.
 
 ### `GET /api/articles`
 
-Returns a paginated list of articles.
+Returns a paginated list of articles. All filters below are optional and combine together (AND'd) — e.g. `category=cricket&date=2026-07-10` returns only cricket articles published that day. Omitting `date` entirely returns everything currently in the ~5-day retention window, not just today.
 
 | Query param | Type | Description |
 |---|---|---|
-| `keyword` | string | Full-text search in title/description (takes priority over other filters) |
+| `keyword` | string | Full-text search in title/description |
 | `source` | string | Filter by source (`espncricinfo`, `bhaskar`, `autocarindia`, `gadgets360`, `bbc`) |
 | `category` | string | Filter by category (`cricket`, `automobile`, `technology`, `general`) |
-| `date` | string (`YYYY-MM-DD`) | Filter by publish date (defaults to today if no other filter given) |
+| `date` | string (`YYYY-MM-DD`) | Filter by publish date (omit to show all cached articles) |
 | `page` | number | Page number, 0-indexed (default `0`) |
 | `size` | number | Page size (default `100`) |
 

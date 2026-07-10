@@ -83,6 +83,16 @@ architecture plan agreed before building.
   and per source), the actual titles of pending articles, last run time +
   outcome, next scheduled run time, and Groq's remaining request/token quota
   (captured from the last API response's rate-limit headers).
+- **The site shows everything currently cached by default, not just today.**
+  Originally `/api/articles` defaulted to today's date when no date param
+  was given, and picking a category/source silently *replaced* that date
+  scope entirely rather than combining with it — so "All" showed only a
+  handful of today's articles while any category showed the full 5-day
+  history, which looked broken (inconsistent scroll/content amount between
+  views). Per user feedback, the date picker is now purely opt-in: with
+  nothing selected, every filter (keyword/source/category/date) is
+  independent and combines freely, and no date filter at all means "show
+  everything in the retention window."
 
 ## Known limitations
 
