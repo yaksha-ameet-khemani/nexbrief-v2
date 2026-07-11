@@ -35,7 +35,7 @@ export default function ArticleCard({ article }: ArticleCardProps) {
       : (article.summary ?? article.description);
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden hover:shadow-md transition-shadow">
+    <div className="bg-white hover:bg-[#f5f5f5]/60 transition-colors overflow-hidden">
       {/* Thumbnail */}
       {article.thumbnailUrl ? (
         <img
@@ -45,7 +45,7 @@ export default function ArticleCard({ article }: ArticleCardProps) {
           onError={(e) => (e.currentTarget.style.display = "none")}
         />
       ) : (
-        <div className="w-full h-44 bg-gray-100 flex items-center justify-center text-gray-400 text-sm">
+        <div className="w-full h-44 bg-[#f5f5f5] flex items-center justify-center text-[#6d6d6d] text-sm">
           No Image
         </div>
       )}
@@ -53,13 +53,13 @@ export default function ArticleCard({ article }: ArticleCardProps) {
       {/* Content */}
       <div className="p-4 flex flex-col gap-3">
         {/* Title */}
-        <h3 className="text-sm font-semibold text-gray-800 leading-snug line-clamp-2">
+        <h3 className="text-sm text-[#1f1f1f] leading-snug line-clamp-2">
           {displayTitle}
         </h3>
 
         {/* Date + pending badges — visible at a glance, no click needed */}
         <div className="flex items-center gap-2">
-          <p className="text-xs text-gray-400">{formattedDate}</p>
+          <p className="text-xs text-[#6d6d6d]">{formattedDate}</p>
           {!isAiSummary && (
             <span className="text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
               AI summary pending
@@ -91,7 +91,7 @@ export default function ArticleCard({ article }: ArticleCardProps) {
                   : "Read Preview ▼"}
             </button>
             {showSummary && (
-              <div className="mt-2 text-xs text-gray-600 leading-relaxed bg-blue-50 rounded-lg p-3">
+              <div className="mt-2 text-xs text-[#3d3d3d] leading-relaxed bg-blue-50 rounded-lg p-3">
                 {!isAiSummary && (
                   <p className="text-blue-400 italic mb-1">
                     AI summary pending — showing quick preview
@@ -115,7 +115,7 @@ export default function ArticleCard({ article }: ArticleCardProps) {
             {showLinks && (
               <div className="flex flex-col gap-1 mt-2">
                 {article.searchQuery && (
-                  <p className="text-xs text-gray-500 italic mb-1">
+                  <p className="text-xs text-[#6d6d6d] italic mb-1">
                     "{article.searchQuery}"
                   </p>
                 )}
@@ -126,7 +126,7 @@ export default function ArticleCard({ article }: ArticleCardProps) {
                       href={url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-700 hover:bg-purple-100 hover:text-purple-700 transition-colors"
+                      className="text-xs px-2 py-1 rounded-full bg-[#f5f5f5] text-[#3d3d3d] hover:bg-purple-100 hover:text-purple-700 transition-colors"
                     >
                       {label}
                     </a>
@@ -142,7 +142,7 @@ export default function ArticleCard({ article }: ArticleCardProps) {
           href={article.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-xs text-center bg-gray-900 text-white rounded-lg py-2 hover:bg-gray-700 transition-colors"
+          className="text-xs text-center bg-[#1f1f1f] text-white rounded-lg py-2 hover:bg-[#3d3d3d] transition-colors"
         >
           Read Full Article →
         </a>

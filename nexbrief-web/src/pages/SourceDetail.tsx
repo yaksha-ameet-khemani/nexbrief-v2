@@ -23,29 +23,29 @@ export default function SourceDetail({ source }: SourceDetailProps) {
   }, [source]);
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="bg-gray-900 text-white px-6 py-4 sticky top-0 z-50 shadow-lg">
+    <div className="min-h-screen bg-[#fffefa]">
+      <nav className="bg-[#fffefa] text-[#1f1f1f] px-6 py-4 sticky top-0 z-50 border-b border-[#eaeaea]">
         <div className="max-w-7xl mx-auto flex items-center gap-3">
-          <a href="/" className="text-2xl font-bold tracking-tight text-white">
-            Nex<span className="text-blue-400">Brief</span>
+          <a href="/" className="text-2xl tracking-tight text-[#1f1f1f]">
+            Nex<span className="text-[#cf412b]">Brief</span>
           </a>
         </div>
       </nav>
 
       <main className="max-w-7xl mx-auto px-4 py-8">
         <div className="flex items-center gap-3 mb-8">
-          <div className="w-1 h-7 bg-red-600 rounded-full" />
-          <h1 className="text-2xl font-bold text-gray-800">{SOURCE_LABELS[source] ?? source}</h1>
-          <div className="flex-1 h-px bg-gray-200" />
-          <a href="/" className="text-sm font-medium text-red-600 hover:underline flex-shrink-0">
+          <div className="w-1 h-7 bg-[#cf412b]" />
+          <h1 className="text-2xl text-[#1f1f1f]">{SOURCE_LABELS[source] ?? source}</h1>
+          <div className="flex-1 h-px bg-[#eaeaea]" />
+          <a href="/" className="text-sm font-medium text-[#cf412b] hover:underline flex-shrink-0">
             ← Back to Home
           </a>
         </div>
 
-        {loading && <p className="text-center text-gray-400 py-20">Loading articles...</p>}
+        {loading && <p className="text-center text-[#6d6d6d] py-20">Loading articles...</p>}
         {error && <p className="text-center text-red-400 py-20">{error}</p>}
         {!loading && !error && articles.length === 0 && (
-          <p className="text-center text-gray-400 py-20">No articles found for this source.</p>
+          <p className="text-center text-[#6d6d6d] py-20">No articles found for this source.</p>
         )}
         {!loading && !error && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">

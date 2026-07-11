@@ -3,8 +3,42 @@
 html {
   /* Bumps every rem-based Tailwind text size up proportionally (~+2px at the base sizes used in this app). */
   font-size: 112.5%;
+  font-family: "DM Sans", sans-serif;
 }
 
 body {
   margin: 0;
+  background-color: #fffefa;
+}
+
+button,
+input {
+  font-family: inherit;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: "Lexend", sans-serif;
+  font-weight: 500;
+}
+
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee {
+  animation: marquee linear infinite;
+}
+
+.marquee-viewport:hover .animate-marquee {
+  animation-play-state: paused;
 }

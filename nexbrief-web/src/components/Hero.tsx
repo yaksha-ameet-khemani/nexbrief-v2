@@ -5,19 +5,19 @@ interface HeroProps {
   articles: Article[];
 }
 
-// Picks the single most recent article from each of the 3 categories that
+// Picks the single most recent article from each of the 3 sources that
 // currently have the freshest news, so the hero always shows a mix of
-// topics rather than e.g. 3 cricket articles back to back just because
-// cricket happened to have a busy hour.
+// outlets rather than e.g. 3 BBC articles back to back just because BBC
+// happened to have a busy hour.
 export function pickHeroArticles(articles: Article[]): Article[] {
-  const mostRecentByCategory = new Map<string, Article>();
+  const mostRecentBySource = new Map<string, Article>();
   for (const a of articles) {
-    const current = mostRecentByCategory.get(a.category);
+    const current = mostRecentBySource.get(a.source);
     if (!current || new Date(a.publishedAt).getTime() > new Date(current.publishedAt).getTime()) {
-      mostRecentByCategory.set(a.category, a);
+      mostRecentBySource.set(a.source, a);
     }
   }
-  return [...mostRecentByCategory.values()]
+  return [...mostRecentBySource.values()]
     .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
     .slice(0, 3);
 }
@@ -32,7 +32,7 @@ function formatDate(iso: string): string {
 
 function CategoryBadge({ category }: { category: string }) {
   return (
-    <span className="inline-block text-[10px] font-bold tracking-wide uppercase text-red-700 bg-red-50 border border-red-200 rounded px-2 py-0.5">
+    <span className="inline-block text-[10px] font-bold tracking-wide uppercase text-[#cf412b] bg-[#cf412b]/10 border border-[#cf412b]/30 rounded px-2 py-0.5">
       {CATEGORY_LABELS[category] ?? category}
     </span>
   );
@@ -49,7 +49,7 @@ export default function Hero({ articles }: HeroProps) {
         href={main.url}
         target="_blank"
         rel="noopener noreferrer"
-        className="relative rounded-xl overflow-hidden bg-gray-900 group h-72 lg:h-full min-h-[22rem] block"
+        className="relative overflow-hidden bg-[#1f1f1f] group h-72 lg:h-full min-h-[22rem] block"
       >
         {main.thumbnailUrl && (
           <img
@@ -61,7 +61,7 @@ export default function Hero({ articles }: HeroProps) {
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
         <div className="absolute bottom-0 left-0 right-0 p-6 flex flex-col gap-2">
           <CategoryBadge category={main.category} />
-          <h2 className="text-white text-xl lg:text-2xl font-bold leading-snug">{main.title}</h2>
+          <h2 className="text-white text-xl lg:text-2xl leading-snug">{main.title}</h2>
           <p className="text-gray-300 text-xs">{formatDate(main.publishedAt)}</p>
         </div>
       </a>
@@ -74,21 +74,21 @@ export default function Hero({ articles }: HeroProps) {
             href={a.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex gap-4 bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow overflow-hidden p-3"
+            className="flex gap-4 bg-white hover:bg-[#f5f5f5]/60 transition-colors overflow-hidden p-3"
           >
             {a.thumbnailUrl ? (
               <img
                 src={a.thumbnailUrl}
                 alt={a.title}
-                className="w-32 h-full min-h-[7rem] object-cover rounded-lg flex-shrink-0"
+                className="w-32 h-full min-h-[7rem] object-cover flex-shrink-0"
               />
             ) : (
-              <div className="w-32 min-h-[7rem] bg-gray-100 rounded-lg flex-shrink-0" />
+              <div className="w-32 min-h-[7rem] bg-[#f5f5f5] flex-shrink-0" />
             )}
             <div className="flex flex-col gap-2 justify-center">
               <CategoryBadge category={a.category} />
-              <h3 className="text-sm font-bold text-gray-800 leading-snug line-clamp-2">{a.title}</h3>
-              <p className="text-xs text-gray-400">{formatDate(a.publishedAt)}</p>
+              <h3 className="text-sm text-[#1f1f1f] leading-snug line-clamp-2">{a.title}</h3>
+              <p className="text-xs text-[#6d6d6d]">{formatDate(a.publishedAt)}</p>
             </div>
           </a>
         ))}

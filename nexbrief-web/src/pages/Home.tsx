@@ -2,12 +2,9 @@ import { useEffect, useState, useCallback } from "react";
 import type { Article } from "../types/Article";
 import { fetchArticles } from "../api/articleApi";
 import Navbar from "../components/Navbar";
-import SourceSection from "../components/SourceSection";
 import ArticleCard from "../components/ArticleCard";
 import Hero, { pickHeroArticles } from "../components/Hero";
 import NewsCarousel from "../components/NewsCarousel";
-
-const SOURCES = ["espncricinfo", "bhaskar", "autocarindia", "gadgets360", "bbc", "bbcurdu"];
 
 export default function Home() {
   const [articles, setArticles] = useState<Article[]>([]);
@@ -43,17 +40,15 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [loadArticles]);
 
-  const grouped = SOURCES.reduce<Record<string, Article[]>>((acc, source) => {
-    acc[source] = articles.filter((a) => a.source === source);
-    return acc;
-  }, {});
-
   const isBrowsing = !keyword && !selectedCategory;
   const heroIds = new Set(isBrowsing ? pickHeroArticles(articles).map((a) => a.id) : []);
-  const carouselArticles = articles.filter((a) => !heroIds.has(a.id));
+  const remaining = articles.filter((a) => !heroIds.has(a.id));
+  const feedArticles = [...remaining].sort(
+    (a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime(),
+  );
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#fffefa]">
       <Navbar
         keyword={keyword}
         onKeywordChange={setKeyword}
@@ -65,11 +60,11 @@ export default function Home() {
 
       <main className="max-w-7xl mx-auto px-4 py-8">
         {loading && (
-          <p className="text-center text-gray-400 py-20">Loading articles...</p>
+          <p className="text-center text-[#6d6d6d] py-20">Loading articles...</p>
         )}
         {error && <p className="text-center text-red-400 py-20">{error}</p>}
         {!loading && !error && articles.length === 0 && (
-          <p className="text-center text-gray-400 py-20">
+          <p className="text-center text-[#6d6d6d] py-20">
             {selectedDate ? "No articles found for this date." : "No articles found."}
           </p>
         )}
@@ -84,14 +79,12 @@ export default function Home() {
           ) : (
             <>
               <Hero articles={articles} />
-              <NewsCarousel articles={carouselArticles} />
-              {SOURCES.map((source) => (
-                <SourceSection
-                  key={source}
-                  source={source}
-                  articles={grouped[source]}
-                />
-              ))}
+              <NewsCarousel articles={remaining} />
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {feedArticles.map((a) => (
+                  <ArticleCard key={a.id} article={a} />
+                ))}
+              </div>
             </>
           ))}
       </main>

@@ -24,15 +24,15 @@ export default function Navbar({
   onDateChange,
 }: NavbarProps) {
   return (
-    <nav className="bg-gray-900 text-white px-6 py-4 sticky top-0 z-50 shadow-lg">
+    <nav className="bg-[#fffefa] text-[#1f1f1f] px-6 py-4 sticky top-0 z-50 border-b border-[#eaeaea]">
       <div className="max-w-7xl mx-auto flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold tracking-tight text-white">
-            Nex<span className="text-blue-400">Brief</span>
+          <h1 className="text-2xl tracking-tight text-[#1f1f1f]">
+            Nex<span className="text-[#cf412b]">Brief</span>
           </h1>
           <a
             href="/status"
-            className="text-xs px-3 py-1 rounded-full bg-gray-700 text-gray-300 hover:bg-gray-600 transition-colors"
+            className="text-xs px-3 py-1 rounded-full bg-[#f5f5f5] text-[#6d6d6d] hover:bg-[#eaeaea] transition-colors"
           >
             Status
           </a>
@@ -43,7 +43,7 @@ export default function Navbar({
           value={selectedDate}
           max={new Date().toISOString().split("T")[0]}
           onChange={(e) => onDateChange(e.target.value)}
-          className="bg-gray-800 text-white rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400"
+          className="bg-[#f5f5f5] text-[#1f1f1f] border border-[#eaeaea] rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#cf412b]/40"
         />
 
         <input
@@ -51,7 +51,7 @@ export default function Navbar({
           placeholder="Search articles..."
           value={keyword}
           onChange={(e) => onKeywordChange(e.target.value)}
-          className="bg-gray-800 text-white placeholder-gray-400 rounded-lg px-4 py-2 w-full md:w-72 focus:outline-none focus:ring-2 focus:ring-blue-400"
+          className="bg-[#f5f5f5] text-[#1f1f1f] placeholder-[#6d6d6d] border border-[#eaeaea] rounded-lg px-4 py-2 w-full md:w-72 focus:outline-none focus:ring-2 focus:ring-[#cf412b]/40"
         />
 
         <div className="flex gap-2 flex-wrap">
@@ -62,8 +62,8 @@ export default function Navbar({
               className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors
                 ${
                   selectedCategory === val
-                    ? "bg-blue-500 text-white"
-                    : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+                    ? "bg-[#cf412b] text-white"
+                    : "bg-[#f5f5f5] text-[#3d3d3d] hover:bg-[#eaeaea]"
                 }`}
             >
               {label}

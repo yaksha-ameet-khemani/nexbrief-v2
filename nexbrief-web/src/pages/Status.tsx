@@ -79,21 +79,21 @@ export default function Status() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <nav className="bg-gray-900 text-white px-6 py-4 sticky top-0 z-50 shadow-lg">
+      <nav className="bg-[#fffefa] text-[#1f1f1f] px-6 py-4 sticky top-0 z-50 border-b border-[#eaeaea]">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
-          <a href="/" className="text-2xl font-bold tracking-tight text-white">
-            Nex<span className="text-blue-400">Brief</span>{" "}
-            <span className="text-gray-400 text-lg font-normal">/ Status</span>
+          <a href="/" className="text-2xl tracking-tight text-[#1f1f1f]">
+            Nex<span className="text-[#cf412b]">Brief</span>{" "}
+            <span className="text-[#6d6d6d] text-lg font-normal">/ Status</span>
           </a>
           <div className="flex items-center gap-3">
             {lastFetchedAt && (
-              <span className="text-xs text-gray-400">
+              <span className="text-xs text-[#6d6d6d]">
                 {loading ? "Refreshing…" : `Updated ${secondsAgo(lastFetchedAt, now)}`}
               </span>
             )}
             <button
               onClick={load}
-              className="text-sm px-4 py-1.5 rounded-full bg-gray-700 text-gray-200 hover:bg-gray-600 transition-colors"
+              className="text-sm px-4 py-1.5 rounded-full bg-[#f5f5f5] text-[#3d3d3d] hover:bg-[#eaeaea] transition-colors"
             >
               Refresh
             </button>
