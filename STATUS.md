@@ -1,6 +1,6 @@
 # NexBrief-v2 — Status
 
-Last updated: 2026-07-10 (session paused here — see "Open question" below)
+Last updated: 2026-07-11
 
 ## What this is
 
@@ -28,8 +28,9 @@ architecture plan agreed before building.
   Dainik Bhaskar, Autocar India, Gadgets360, BBC, BBC Urdu) → scrapes full
   article text via `HTMLRewriter` → summarizes via Groq
   (`llama-3.3-70b-versatile`) → generates a search query + category-specific
-  search links → stores everything as one JSON blob in Workers KV (no
-  database). Also serves the read API and a manual-trigger test route.
+  search links → (BBC Urdu only) translates the title/summary to English via
+  Cloudflare Workers AI → stores everything as one JSON blob in Workers KV
+  (no database). Also serves the read API and a manual-trigger test route.
 - `nexbrief-web/` — Fresh Vite + React 19 + TypeScript + Tailwind frontend.
   Fetches from the Worker's API. Includes a `/status` page showing pipeline
   health (article counts, last/next run, Groq quota, and the actual titles
@@ -52,6 +53,9 @@ architecture plan agreed before building.
 
 - Cloudflare Worker secrets: `GROQ_API_KEY`, `REFRESH_SECRET` (gates
   `POST /api/refresh`, the manual pipeline trigger for testing).
+- Translation uses a Workers AI binding (`AI`, declared in `wrangler.toml`'s
+  `[ai]` block) — no separate API key needed, it's account-level and billed
+  (free tier) separately from Groq.
 - GitHub repo secret: `CLOUDFLARE_API_TOKEN` (scoped via the "Edit Cloudflare
   Workers" token template).
 - The original Groq key is still also sitting in plaintext in
@@ -113,6 +117,29 @@ architecture plan agreed before building.
   before processing (applied to both the new-article loop and the Phase 0
   backlog-retry loop), so every source gets an early turn each run
   regardless of its position in the source list.
+- **New-article discovery (Phase 1) no longer waits on backlog
+  summarization (Phase 0) succeeding.** Previously, if Phase 0 hit Groq's
+  rate limit, the whole pipeline returned immediately — Phase 1 (fetching
+  RSS for brand-new articles) never ran that hour at all. This silently
+  starved BBC Urdu (added when there was a large pending backlog): its
+  fast-moving feed kept rotating past whatever was missed before the next
+  run got a chance, so it sat at 1-2 total articles for hours after being
+  added despite the feed clearly having fresh items. Fixed by always
+  running Phase 1 — new articles are scraped and saved as pending
+  (skipping the Groq call once a rate limit is already known) rather than
+  never being fetched at all.
+- **BBC Urdu articles get an English translation of the title/summary**,
+  generated via Cloudflare Workers AI (`@cf/meta/m2m100-1.2b`) right after
+  the Groq summary succeeds, stored as `titleEn`/`summaryEn` alongside the
+  native-language fields (both `null` until translated). The frontend shows
+  a "Translate to English ◑" toggle on the card whenever a translation
+  exists, swapping title + summary in place — same interaction as browsers'
+  built-in page-translate prompts. Chose precompute-during-cron over
+  on-demand/on-click specifically because it's Workers AI, not Groq — a
+  separate free-tier quota, so it doesn't compete with summarization for
+  rate-limit budget. Scoped to BBC Urdu only for now (see `TRANSLATE_SOURCES`
+  in `index.ts`); Hindi (Dainik Bhaskar) could get the same treatment later
+  if wanted.
 
 ## Open question (pause point — 2026-07-10)
 
@@ -152,14 +179,30 @@ long-term storage balance) — not yet decided, pick this up next session.
   keeps whatever it finished instead of losing all of it.
 - No visual/browser UI testing was done by Claude directly (no browser tool
   available in that environment) — verified via curl/API responses and the
-  user checking the live site themselves.
+  user checking the live site themselves. **Update 2026-07-11:** browser
+  testing became possible in a later session (Playwright + downloaded
+  Chromium, driven directly rather than via the `chromium-cli` skill tool
+  which wasn't available) — used to verify the translation feature's
+  frontend changes didn't regress card rendering.
+- **Existing BBC Urdu articles won't get a retroactive translation** —
+  `titleEn`/`summaryEn` only get populated when an article is *summarized*
+  (new articles, or backlog articles Phase 0 retries). Articles that
+  already have a summary from before the translation feature shipped stay
+  untranslated unless a one-time backfill pass is written.
 
 ## Local development
 
 - `nexbrief-worker/`: `npm install`, copy `.dev.vars.example` → `.dev.vars`
-  with real values, `npx wrangler dev --local --test-scheduled`.
+  with real values, `npx wrangler dev --local --test-scheduled`. The `AI`
+  binding always hits the real Cloudflare account even in `--local` mode
+  (Workers AI has no local emulation) — this incurs real (free-tier) usage
+  during local testing.
 - `nexbrief-web/`: `npm install`, `npm run dev` (defaults to
   `http://localhost:8787/api` unless `VITE_API_BASE_URL` is set).
+- If `.dev.vars`'s `GROQ_API_KEY` goes stale (401s instead of successful
+  summaries when testing the pipeline locally), regenerate it from the Groq
+  console — this looks similar to a rate-limit (429) in the logs but isn't
+  one, and won't self-resolve by waiting.
 
 ## Possible next steps (not yet done, not requested)
 
