@@ -90,18 +90,10 @@ async function runPipeline(env: Env): Promise<void> {
   const backlogResult = await processBacklog(env, articles);
   articles = backlogResult.articles;
   if (backlogResult.rateLimited) {
-    await saveArticles(env, articles);
-    await saveMeta(env, {
-      lastRunAt: new Date().toISOString(),
-      lastRunNewArticles: 0,
-      lastRunBacklogCleared: backlogResult.cleared,
-      lastRunRateLimited: true,
-      groqRateLimit: getLastRateLimitInfo(),
-    });
-    console.warn("Pipeline halted: rate limit hit during backlog processing. Will retry on next run.");
-    return;
+    console.warn("Phase 0: Rate limit hit during backlog processing. Continuing to Phase 1 anyway so new articles still get discovered (they'll just stay pending until a later run).");
+  } else {
+    console.log("Phase 0: Backlog phase complete.");
   }
-  console.log("Phase 0: Backlog phase complete.");
 
   console.log("Phase 1: Fetching RSS...");
   const existingUrls = existingUrlSet(articles);
@@ -110,7 +102,11 @@ async function runPipeline(env: Env): Promise<void> {
 
   console.log("Phase 2 + 3: Extracting content and summarizing new articles...");
   const newArticles: Article[] = [];
-  let rateLimitedDuringNew = false;
+  // If Phase 0 already hit the rate limit, don't bother spending Groq calls
+  // in this loop either — they'd just 429 again. Still scrape and save every
+  // new article below so discovery (which costs no Groq quota) never stalls
+  // just because summarization is temporarily out of quota.
+  let rateLimitedDuringNew = backlogResult.rateLimited;
 
   for (const raw of newRaw) {
     const rawContent = await scrapeArticle(raw.url, raw.source);
@@ -127,7 +123,7 @@ async function runPipeline(env: Env): Promise<void> {
     let searchQuery: string | null = null;
     let links: Record<string, string> | null = null;
 
-    if (contentToSummarize) {
+    if (contentToSummarize && !rateLimitedDuringNew) {
       try {
         summary = await summarize(env, contentToSummarize, raw.language);
       } catch (err) {
@@ -169,11 +165,10 @@ async function runPipeline(env: Env): Promise<void> {
     // Phase 0 backlog loop above: a killed background task shouldn't throw
     // away already-completed work.
     await saveArticles(env, [...articles, ...newArticles]);
+  }
 
-    if (rateLimitedDuringNew) {
-      console.warn("Phase 3: Rate limit hit (429). Stopping summarization for this run.");
-      break;
-    }
+  if (rateLimitedDuringNew) {
+    console.warn("Phase 2+3: Rate limit hit (429). New articles were still fetched and saved as pending for a later run to summarize.");
   }
 
   const merged = [...articles, ...newArticles];
