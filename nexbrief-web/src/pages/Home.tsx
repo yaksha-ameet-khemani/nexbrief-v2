@@ -4,6 +4,8 @@ import { fetchArticles } from "../api/articleApi";
 import Navbar from "../components/Navbar";
 import SourceSection from "../components/SourceSection";
 import ArticleCard from "../components/ArticleCard";
+import Hero, { pickHeroArticles } from "../components/Hero";
+import NewsCarousel from "../components/NewsCarousel";
 
 const SOURCES = ["espncricinfo", "bhaskar", "autocarindia", "gadgets360", "bbc", "bbcurdu"];
 
@@ -46,6 +48,10 @@ export default function Home() {
     return acc;
   }, {});
 
+  const isBrowsing = !keyword && !selectedCategory;
+  const heroIds = new Set(isBrowsing ? pickHeroArticles(articles).map((a) => a.id) : []);
+  const carouselArticles = articles.filter((a) => !heroIds.has(a.id));
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar
@@ -69,20 +75,24 @@ export default function Home() {
         )}
         {!loading &&
           !error &&
-          (keyword || selectedCategory ? (
+          (!isBrowsing ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {articles.map((a) => (
                 <ArticleCard key={a.id} article={a} />
               ))}
             </div>
           ) : (
-            SOURCES.map((source) => (
-              <SourceSection
-                key={source}
-                source={source}
-                articles={grouped[source]}
-              />
-            ))
+            <>
+              <Hero articles={articles} />
+              <NewsCarousel articles={carouselArticles} />
+              {SOURCES.map((source) => (
+                <SourceSection
+                  key={source}
+                  source={source}
+                  articles={grouped[source]}
+                />
+              ))}
+            </>
           ))}
       </main>
     </div>

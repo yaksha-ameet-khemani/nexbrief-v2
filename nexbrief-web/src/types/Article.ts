@@ -34,3 +34,10 @@ export const SOURCE_LABELS: Record<string, string> = {
 };
 
 export const CATEGORIES = ["cricket", "automobile", "technology", "general"];
+
+export const CATEGORY_LABELS: Record<string, string> = {
+  cricket: "Cricket",
+  automobile: "Automobile",
+  technology: "Technology",
+  general: "General",
+};
