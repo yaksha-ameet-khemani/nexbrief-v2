@@ -12,6 +12,11 @@ import {
 } from "./groq";
 import { loadArticles, saveArticles, existingUrlSet, loadMeta, saveMeta } from "./store";
 import { handleGetArticles, handleGetStatus, jsonResponse, corsPreflight, CORS_HEADERS } from "./api";
+import { translateToEnglish } from "./translate";
+
+// Sources whose articles also get an English title/summary generated via
+// Cloudflare Workers AI, for a "Translate to English" toggle in the UI.
+const TRANSLATE_SOURCES = new Set(["bbcurdu"]);
 
 const BACKLOG_LIMIT = 20; // matches AiSummaryService.BACKLOG_LIMIT
 
@@ -122,6 +127,8 @@ async function runPipeline(env: Env): Promise<void> {
     let summary: string | null = null;
     let searchQuery: string | null = null;
     let links: Record<string, string> | null = null;
+    let titleEn: string | null = null;
+    let summaryEn: string | null = null;
 
     if (contentToSummarize && !rateLimitedDuringNew) {
       try {
@@ -144,6 +151,13 @@ async function runPipeline(env: Env): Promise<void> {
         });
         searchQuery = query;
         links = buildLinks(query ?? raw.title, raw.category);
+
+        // Workers AI is a separate free-tier quota from Groq, so this
+        // doesn't compete with summarization for rate limit budget.
+        if (TRANSLATE_SOURCES.has(raw.source)) {
+          titleEn = await translateToEnglish(env, raw.title, raw.language);
+          summaryEn = await translateToEnglish(env, summary, raw.language);
+        }
       }
 
       await sleep(RATE_LIMIT_PACING_MS); // pace before the next article's Groq calls
@@ -158,6 +172,8 @@ async function runPipeline(env: Env): Promise<void> {
       summary,
       searchQuery,
       links,
+      titleEn,
+      summaryEn,
       createdAt: new Date().toISOString(),
     });
 
@@ -213,6 +229,12 @@ async function processBacklog(
         });
         article.searchQuery = query;
         article.links = buildLinks(query ?? article.title, article.category);
+
+        if (TRANSLATE_SOURCES.has(article.source)) {
+          article.titleEn = await translateToEnglish(env, article.title, article.language);
+          article.summaryEn = await translateToEnglish(env, summary, article.language);
+        }
+
         cleared++;
         console.log(`Phase 0: Backlog summarized | source=${article.source} | title=${article.title}`);
 

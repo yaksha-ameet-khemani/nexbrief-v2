@@ -11,6 +11,9 @@ crons = ["0 * * * *"]
 binding = "NEXBRIEF_KV"
 id = "ce815ca8206e461bb0f2202807a17546"
 
+[ai]
+binding = "AI"
+
 [vars]
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_API_MODEL = "llama-3.3-70b-versatile"

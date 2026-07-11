@@ -8,6 +8,7 @@ interface ArticleCardProps {
 export default function ArticleCard({ article }: ArticleCardProps) {
   const [showSummary, setShowSummary] = useState(false);
   const [showLinks, setShowLinks] = useState(false);
+  const [showEnglish, setShowEnglish] = useState(false);
 
   const formattedDate = new Date(article.publishedAt).toLocaleDateString(
     "en-IN",
@@ -22,7 +23,16 @@ export default function ArticleCard({ article }: ArticleCardProps) {
   // can lag an hour or two behind) — fall back to the RSS description so the
   // article still shows up instead of being hidden until it's polished.
   const isAiSummary = article.summary != null;
-  const summaryText = article.summary ?? article.description;
+
+  // Translation (via Cloudflare Workers AI) is generated alongside the
+  // summary, so it isn't ready until the summary itself is — hasTranslation
+  // being false just means "not translated yet", same lag as the summary.
+  const hasTranslation = article.titleEn != null;
+  const displayTitle = showEnglish && hasTranslation ? article.titleEn! : article.title;
+  const summaryText =
+    showEnglish && hasTranslation
+      ? (article.summaryEn ?? article.summary ?? article.description)
+      : (article.summary ?? article.description);
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden hover:shadow-md transition-shadow">
@@ -44,10 +54,10 @@ export default function ArticleCard({ article }: ArticleCardProps) {
       <div className="p-4 flex flex-col gap-3">
         {/* Title */}
         <h3 className="text-sm font-semibold text-gray-800 leading-snug line-clamp-2">
-          {article.title}
+          {displayTitle}
         </h3>
 
-        {/* Date + pending badge — visible at a glance, no click needed */}
+        {/* Date + pending badges — visible at a glance, no click needed */}
         <div className="flex items-center gap-2">
           <p className="text-xs text-gray-400">{formattedDate}</p>
           {!isAiSummary && (
@@ -56,6 +66,16 @@ export default function ArticleCard({ article }: ArticleCardProps) {
             </span>
           )}
         </div>
+
+        {/* Translate toggle — only for sources with a generated translation */}
+        {hasTranslation && (
+          <button
+            onClick={() => setShowEnglish(!showEnglish)}
+            className="self-start text-xs text-emerald-600 font-medium hover:underline"
+          >
+            {showEnglish ? "Show Original ◐" : "Translate to English ◑"}
+          </button>
+        )}
 
         {/* Summary accordion — real AI summary if ready, RSS description otherwise */}
         {summaryText && (
