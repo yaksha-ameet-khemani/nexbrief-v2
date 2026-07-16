@@ -22,9 +22,16 @@ import {
 import { translateToEnglish } from "./translate";
 import { AUTO_PAUSE_PENDING_THRESHOLD } from "./constants";
 
-// Sources whose articles also get an English title/summary generated via
-// Cloudflare Workers AI, for a "Translate to English" toggle in the UI.
+// Sources whose articles are translated to English (via Cloudflare Workers
+// AI) before anything else happens to them — title, description, and raw
+// content are all translated up front, so scraping/summarizing/display all
+// operate on English text and nothing native ever reaches the site.
 const TRANSLATE_SOURCES = new Set(["bbcurdu"]);
+
+// Matches the article-body truncation `summarize()` already applies (see
+// groq.ts) — no point translating more of the article than Groq will ever
+// actually read.
+const TRANSLATE_CONTENT_MAX_CHARS = 3000;
 
 const BACKLOG_LIMIT = 20; // matches AiSummaryService.BACKLOG_LIMIT
 
@@ -53,6 +60,68 @@ function interleaveBySource<T extends { source: string }>(items: T[]): T[] {
     }
   }
   return result;
+}
+
+// One-time-per-article migration for TRANSLATE_SOURCES: translates title,
+// description, rawContent, and summary (whichever are present) to English
+// and flips `language` to "en", so it's skipped on every later run. Runs
+// over the *whole* store (not just pending articles) so already-summarized
+// legacy articles fetched before this behavior existed get caught too, not
+// just future ones. Only Phase 0/2/3 look at `language` afterward, and by
+// then it's already "en", so no other code needs to know this source was
+// ever non-English.
+async function normalizeTranslatedSources(
+  env: Env,
+  articles: Article[],
+): Promise<{ articles: Article[]; migrated: number }> {
+  let migrated = 0;
+
+  for (const article of articles) {
+    if (!TRANSLATE_SOURCES.has(article.source) || article.language === "en") continue;
+
+    const originalLanguage = article.language;
+    const translatedTitle = await translateToEnglish(env, article.title, originalLanguage);
+    if (!translatedTitle) {
+      // Title is always visible — if it fails to translate, leave the whole
+      // article untouched (language stays non-"en") so a later run retries
+      // it, rather than risk showing native text forever.
+      console.warn(`Normalize: Failed to translate title, will retry next run | source=${article.source}`);
+      continue;
+    }
+    article.title = translatedTitle;
+
+    if (article.description) {
+      article.description =
+        (await translateToEnglish(env, article.description, originalLanguage)) ?? article.description;
+    }
+    if (article.rawContent) {
+      article.rawContent =
+        (await translateToEnglish(
+          env,
+          article.rawContent.slice(0, TRANSLATE_CONTENT_MAX_CHARS),
+          originalLanguage,
+        )) ?? article.rawContent;
+    }
+    if (article.summary) {
+      article.summary =
+        (await translateToEnglish(env, article.summary, originalLanguage)) ?? article.summary;
+    }
+
+    article.language = "en";
+    migrated++;
+
+    // Save after every article, not just at the end — a killed waitUntil
+    // background task shouldn't throw away translations already paid for
+    // (same reasoning as the incremental saves in processBacklog/runPipeline
+    // below, learned the hard way — see STATUS.md).
+    await saveArticles(env, articles);
+  }
+
+  if (migrated > 0) {
+    console.log(`Normalize: Translated ${migrated} legacy non-English article(s) to English.`);
+  }
+
+  return { articles, migrated };
 }
 
 export default {
@@ -109,6 +178,10 @@ async function runPipeline(env: Env): Promise<void> {
   console.log("Pipeline started...");
 
   let articles = await loadArticles(env);
+
+  console.log("Phase -1: Normalizing any legacy non-English TRANSLATE_SOURCES articles...");
+  ({ articles } = await normalizeTranslatedSources(env, articles));
+
   const sourceConfig = await loadSourceConfig(env);
   const disabledSources = new Set(sourceConfig.disabledSources);
   if (disabledSources.size > 0) {
@@ -158,25 +231,55 @@ async function runPipeline(env: Env): Promise<void> {
   let rateLimitedDuringNew = backlogResult.rateLimited;
 
   for (const raw of newRaw) {
-    const rawContent = await scrapeArticle(raw.url, raw.source);
+    const scraped = await scrapeArticle(raw.url, raw.source);
+    const scrapeOk = scraped !== EXTRACTION_FAILED && scraped.length > 0;
 
     // Some sites (e.g. ESPNCricinfo, Gadgets360) block requests from
     // Cloudflare's IP ranges with a 403, unrelated to our selectors. Rather
     // than permanently losing those articles (they'd never get a summary and
     // Phase 0 only retries articles that already have rawContent), fall back
     // to summarizing the RSS description so the article still shows up.
-    const contentToSummarize =
-      rawContent !== EXTRACTION_FAILED && rawContent.length > 0 ? rawContent : raw.description;
+    // This is also what gets stored as rawContent, for Phase 0 to reuse if
+    // this run doesn't get to summarizing it (e.g. rate-limited).
+    let title = raw.title;
+    let description = raw.description;
+    let language = raw.language;
+    let content: string | null = scrapeOk ? scraped : raw.description;
+
+    // Translate up front, before anything else touches this article — title,
+    // description, and the content that'll be summarized are all replaced
+    // with their English translation, and `language` flips to "en" so Groq
+    // summarizes in English directly (no native summary is ever produced, so
+    // there's nothing left to translate afterward).
+    if (TRANSLATE_SOURCES.has(raw.source) && language !== "en") {
+      const translatedTitle = await translateToEnglish(env, raw.title, raw.language);
+      const translatedContent = content
+        ? await translateToEnglish(env, content.slice(0, TRANSLATE_CONTENT_MAX_CHARS), raw.language)
+        : null;
+
+      // Only commit to English if every translation this article actually
+      // needed came through — a partial translation would still flip
+      // `language` to "en", and normalizeTranslatedSources() skips anything
+      // already marked "en", so a partial failure would never get retried.
+      if (translatedTitle && (!content || translatedContent)) {
+        title = translatedTitle;
+        if (description) {
+          description = (await translateToEnglish(env, description, raw.language)) ?? description;
+        }
+        if (translatedContent) content = translatedContent;
+        language = "en";
+      } else {
+        console.warn(`Phase 2: Failed to translate, will retry next run | source=${raw.source}`);
+      }
+    }
 
     let summary: string | null = null;
     let searchQuery: string | null = null;
     let links: Record<string, string> | null = null;
-    let titleEn: string | null = null;
-    let summaryEn: string | null = null;
 
-    if (contentToSummarize && !rateLimitedDuringNew) {
+    if (content && !rateLimitedDuringNew) {
       try {
-        summary = await summarize(env, contentToSummarize, raw.language);
+        summary = await summarize(env, content, language);
       } catch (err) {
         if (err instanceof RateLimitError) {
           rateLimitedDuringNew = true;
@@ -187,21 +290,14 @@ async function runPipeline(env: Env): Promise<void> {
 
       if (summary) {
         await sleep(RATE_LIMIT_PACING_MS); // pace the two Groq calls apart
-        const query = await extractSearchQuery(env, raw.title, summary).catch((err) => {
+        const query = await extractSearchQuery(env, title, summary).catch((err) => {
           if (!(err instanceof RateLimitError)) {
-            console.error(`SearchLink: Error | title=${raw.title} | ${(err as Error).message}`);
+            console.error(`SearchLink: Error | title=${title} | ${(err as Error).message}`);
           }
           return null;
         });
         searchQuery = query;
-        links = buildLinks(query ?? raw.title, raw.category);
-
-        // Workers AI is a separate free-tier quota from Groq, so this
-        // doesn't compete with summarization for rate limit budget.
-        if (TRANSLATE_SOURCES.has(raw.source)) {
-          titleEn = await translateToEnglish(env, raw.title, raw.language);
-          summaryEn = await translateToEnglish(env, summary, raw.language);
-        }
+        links = buildLinks(query ?? title, raw.category);
       }
 
       await sleep(RATE_LIMIT_PACING_MS); // pace before the next article's Groq calls
@@ -210,14 +306,13 @@ async function runPipeline(env: Env): Promise<void> {
     newArticles.push({
       id: crypto.randomUUID(),
       ...raw,
-      // Store whatever text was actually used for summarization, so a
-      // rate-limited run leaves something for Phase 0 to retry next time.
-      rawContent: rawContent !== EXTRACTION_FAILED ? rawContent : (contentToSummarize ?? null),
+      title,
+      description,
+      language,
+      rawContent: content,
       summary,
       searchQuery,
       links,
-      titleEn,
-      summaryEn,
       createdAt: new Date().toISOString(),
     });
 
@@ -276,11 +371,6 @@ async function processBacklog(
         });
         article.searchQuery = query;
         article.links = buildLinks(query ?? article.title, article.category);
-
-        if (TRANSLATE_SOURCES.has(article.source)) {
-          article.titleEn = await translateToEnglish(env, article.title, article.language);
-          article.summaryEn = await translateToEnglish(env, summary, article.language);
-        }
 
         cleared++;
         console.log(`Phase 0: Backlog summarized | source=${article.source} | title=${article.title}`);

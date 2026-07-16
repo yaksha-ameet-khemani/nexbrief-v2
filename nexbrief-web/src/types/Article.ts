@@ -11,8 +11,6 @@ export interface Article {
   summary: string | null;
   searchQuery: string | null;
   links: Record<string, string> | null;
-  titleEn: string | null;
-  summaryEn: string | null;
   publishedAt: string;
 }
 

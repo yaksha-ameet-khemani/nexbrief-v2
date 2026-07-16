@@ -1,6 +1,6 @@
 # NexBrief-v2 — Status
 
-Last updated: 2026-07-11
+Last updated: 2026-07-16
 
 ## What this is
 
@@ -25,12 +25,14 @@ architecture plan agreed before building.
 
 - `nexbrief-worker/` — Cloudflare Worker (TypeScript). Runs an hourly Cron
   Trigger (`0 * * * *`) that: fetches RSS from 6 sources (ESPNCricinfo,
-  Dainik Bhaskar, Autocar India, Gadgets360, BBC, BBC Urdu) → scrapes full
-  article text via `HTMLRewriter` → summarizes via Groq
-  (`llama-3.3-70b-versatile`) → generates a search query + category-specific
-  search links → (BBC Urdu only) translates the title/summary to English via
-  Cloudflare Workers AI → stores everything as one JSON blob in Workers KV
-  (no database). Also serves the read API and a manual-trigger test route.
+  Dainik Bhaskar, Autocar India, Gadgets360, BBC, BBC Urdu) → (BBC Urdu only)
+  translates title/description to English via Cloudflare Workers AI *before*
+  anything else touches the article → scrapes full article text via
+  `HTMLRewriter` → (BBC Urdu only) translates the scraped content too →
+  summarizes via Groq (`llama-3.3-70b-versatile`, in English for every
+  source, including BBC Urdu) → generates a search query + category-specific
+  search links → stores everything as one JSON blob in Workers KV (no
+  database). Also serves the read API and a manual-trigger test route.
 - `nexbrief-web/` — Fresh Vite + React 19 + TypeScript + Tailwind frontend.
   Fetches from the Worker's API. Includes a `/status` page showing pipeline
   health (article counts, last/next run, Groq quota, and the actual titles
@@ -128,18 +130,31 @@ architecture plan agreed before building.
   running Phase 1 — new articles are scraped and saved as pending
   (skipping the Groq call once a rate limit is already known) rather than
   never being fetched at all.
-- **BBC Urdu articles get an English translation of the title/summary**,
-  generated via Cloudflare Workers AI (`@cf/meta/m2m100-1.2b`) right after
-  the Groq summary succeeds, stored as `titleEn`/`summaryEn` alongside the
-  native-language fields (both `null` until translated). The frontend shows
-  a "Translate to English ◑" toggle on the card whenever a translation
-  exists, swapping title + summary in place — same interaction as browsers'
-  built-in page-translate prompts. Chose precompute-during-cron over
-  on-demand/on-click specifically because it's Workers AI, not Groq — a
-  separate free-tier quota, so it doesn't compete with summarization for
-  rate-limit budget. Scoped to BBC Urdu only for now (see `TRANSLATE_SOURCES`
-  in `index.ts`); Hindi (Dainik Bhaskar) could get the same treatment later
-  if wanted.
+- **(2026-07-16, superseding the original toggle-based design below) BBC
+  Urdu is translated to English *before* anything else happens to it, and
+  nothing native ever reaches the site** — no toggle, no Urdu shown at any
+  point, including while an article is still pending its AI summary. Title,
+  RSS description, and scraped article body are all translated via
+  Cloudflare Workers AI (`@cf/meta/m2m100-1.2b`) immediately after fetch,
+  and Groq then summarizes the already-English content directly (so the
+  summary comes out in English natively — no separate summary-translation
+  step needed). `Article.language` flips to `"en"` once an article has been
+  translated. A `normalizeTranslatedSources()` pass at the very start of
+  every pipeline run (`index.ts`) also catches any article still marked
+  non-English — whether already-summarized (legacy, from before this
+  change) or still pending — translates it in place, and flips its
+  language, so old cached BBC Urdu articles self-migrate to English over
+  the next few runs without needing a separate one-off backfill script. A
+  partial translation failure (e.g. title translates but content doesn't)
+  leaves `language` untouched so the article gets retried whole on a later
+  run, rather than getting stuck half-native with no way to be picked up
+  again. The old design (Groq summarized in Urdu, then a separate
+  Workers-AI pass produced `titleEn`/`summaryEn` for an opt-in "Translate to
+  English ◑" toggle on the card) is gone — those fields no longer exist on
+  `Article`. Scoped to BBC Urdu only for now (see `TRANSLATE_SOURCES` in
+  `index.ts`); Hindi (Dainik Bhaskar) could get the same treatment later if
+  wanted, though it'd currently still show native Hindi since it was never
+  part of `TRANSLATE_SOURCES`.
 
 ## Open question (pause point — 2026-07-10)
 
@@ -184,11 +199,10 @@ long-term storage balance) — not yet decided, pick this up next session.
   Chromium, driven directly rather than via the `chromium-cli` skill tool
   which wasn't available) — used to verify the translation feature's
   frontend changes didn't regress card rendering.
-- **Existing BBC Urdu articles won't get a retroactive translation** —
-  `titleEn`/`summaryEn` only get populated when an article is *summarized*
-  (new articles, or backlog articles Phase 0 retries). Articles that
-  already have a summary from before the translation feature shipped stay
-  untranslated unless a one-time backfill pass is written.
+- **(Resolved 2026-07-16)** Existing BBC Urdu articles used to not get a
+  retroactive translation under the old toggle-based design. The
+  `normalizeTranslatedSources()` migration pass now catches these
+  automatically (see above) — no one-off backfill script was needed.
 
 ## Local development
 
