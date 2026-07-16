@@ -1,6 +1,7 @@
 import type { Article, Env, PageResponse } from "./types";
 import { loadArticles, loadMeta, loadSourceConfig, saveSourceConfig } from "./store";
 import { ALL_SOURCES } from "./feeds";
+import { AUTO_PAUSE_PENDING_THRESHOLD } from "./constants";
 
 export const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -135,6 +136,13 @@ export async function handleGetStatus(env: Env): Promise<Response> {
     lastRunRateLimited: meta?.lastRunRateLimited ?? null,
     groqRateLimit: meta?.groqRateLimit ?? null,
     disabledSources: sourceConfig.disabledSources,
+    // Mirrors the pipeline's own auto-pause check (index.ts) so the status
+    // page can show it — a source shows up here once its pending backlog
+    // exceeds the threshold, whether or not it's also manually disabled.
+    autoPausedSources: Object.entries(bySource)
+      .filter(([, stats]) => stats.pending > AUTO_PAUSE_PENDING_THRESHOLD)
+      .map(([source]) => source),
+    autoPauseThreshold: AUTO_PAUSE_PENDING_THRESHOLD,
   });
 }
 

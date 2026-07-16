@@ -20,6 +20,7 @@ import {
   CORS_HEADERS,
 } from "./api";
 import { translateToEnglish } from "./translate";
+import { AUTO_PAUSE_PENDING_THRESHOLD } from "./constants";
 
 // Sources whose articles also get an English title/summary generated via
 // Cloudflare Workers AI, for a "Translate to English" toggle in the UI.
@@ -123,9 +124,29 @@ async function runPipeline(env: Env): Promise<void> {
     console.log("Phase 0: Backlog phase complete.");
   }
 
+  // Auto-pause fetching (not backlog-clearing) for any non-disabled source
+  // whose pending backlog is already over the threshold — computed after
+  // Phase 0 so a source that just got cleared below the line resumes
+  // fetching again this same run.
+  const pendingCounts = new Map<string, number>();
+  for (const a of articles) {
+    if (a.summary == null) pendingCounts.set(a.source, (pendingCounts.get(a.source) ?? 0) + 1);
+  }
+  const autoPausedSources = new Set(
+    [...pendingCounts.entries()]
+      .filter(([source, count]) => count > AUTO_PAUSE_PENDING_THRESHOLD && !disabledSources.has(source))
+      .map(([source]) => source),
+  );
+  if (autoPausedSources.size > 0) {
+    console.log(
+      `Pipeline: Auto-pausing fetch for sources over the ${AUTO_PAUSE_PENDING_THRESHOLD}-pending threshold: ${[...autoPausedSources].join(", ")}`,
+    );
+  }
+  const fetchSkipSources = new Set([...disabledSources, ...autoPausedSources]);
+
   console.log("Phase 1: Fetching RSS...");
   const existingUrls = existingUrlSet(articles);
-  const newRaw = interleaveBySource(await fetchAllFeeds(existingUrls, disabledSources));
+  const newRaw = interleaveBySource(await fetchAllFeeds(existingUrls, fetchSkipSources));
   console.log(`Phase 1: Completed. ${newRaw.length} new articles found.`);
 
   console.log("Phase 2 + 3: Extracting content and summarizing new articles...");

@@ -35,4 +35,6 @@ export interface StatusResponse {
   lastRunRateLimited: boolean | null;
   groqRateLimit: GroqRateLimitInfo | null;
   disabledSources: string[];
+  autoPausedSources: string[];
+  autoPauseThreshold: number;
 }

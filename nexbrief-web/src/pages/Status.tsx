@@ -300,6 +300,11 @@ export default function Status() {
               {toggleError && (
                 <p className="text-xs text-red-500 mb-3">{toggleError}</p>
               )}
+              <p className="text-xs text-gray-400 -mt-1 mb-3">
+                A source auto-pauses new fetching (but keeps clearing its existing backlog)
+                once its pending count goes over {status.autoPauseThreshold} — it resumes on its
+                own once that drops back down.
+              </p>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm text-left">
                   <thead>
@@ -315,16 +320,22 @@ export default function Status() {
                   <tbody>
                     {Object.entries(status.bySource).map(([source, stats]) => {
                       const isDisabled = status.disabledSources.includes(source);
+                      const isAutoPaused = !isDisabled && status.autoPausedSources.includes(source);
                       return (
                         <tr
                           key={source}
-                          className={`border-b border-gray-50 last:border-0 ${isDisabled ? "opacity-50" : ""}`}
+                          className={`border-b border-gray-50 last:border-0 ${isDisabled || isAutoPaused ? "opacity-50" : ""}`}
                         >
                           <td className="py-2 pr-4 text-gray-700 flex items-center gap-2">
                             {SOURCE_LABELS[source] ?? source}
                             {isDisabled && (
                               <span className="text-xs text-gray-500 bg-gray-100 rounded-full px-2 py-0.5">
                                 Paused
+                              </span>
+                            )}
+                            {isAutoPaused && (
+                              <span className="text-xs text-blue-600 bg-blue-50 rounded-full px-2 py-0.5">
+                                Auto-paused
                               </span>
                             )}
                           </td>
