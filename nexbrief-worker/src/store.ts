@@ -1,7 +1,8 @@
-import type { Article, Env, PipelineMeta } from "./types";
+import type { Article, Env, PipelineMeta, SourceConfig } from "./types";
 
 const KV_KEY = "articles";
 const META_KEY = "meta";
+const SOURCE_CONFIG_KEY = "sourceConfig";
 const RETENTION_DAYS = 5; // keep a rolling window so the date-picker UI still has yesterday/day-before
 
 export async function loadArticles(env: Env): Promise<Article[]> {
@@ -39,4 +40,19 @@ export async function loadMeta(env: Env): Promise<PipelineMeta | null> {
 
 export async function saveMeta(env: Env, meta: PipelineMeta): Promise<void> {
   await env.NEXBRIEF_KV.put(META_KEY, JSON.stringify(meta));
+}
+
+export async function loadSourceConfig(env: Env): Promise<SourceConfig> {
+  const raw = await env.NEXBRIEF_KV.get(SOURCE_CONFIG_KEY);
+  if (!raw) return { disabledSources: [] };
+  try {
+    return JSON.parse(raw) as SourceConfig;
+  } catch (err) {
+    console.error("store: failed to parse source config JSON, defaulting to all-enabled", err);
+    return { disabledSources: [] };
+  }
+}
+
+export async function saveSourceConfig(env: Env, config: SourceConfig): Promise<void> {
+  await env.NEXBRIEF_KV.put(SOURCE_CONFIG_KEY, JSON.stringify(config));
 }

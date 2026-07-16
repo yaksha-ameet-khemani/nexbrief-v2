@@ -53,6 +53,14 @@ export interface PipelineMeta {
   groqRateLimit: GroqRateLimitInfo | null;
 }
 
+// Lets a source be paused without a redeploy — e.g. to stop a source with a
+// huge backlog from eating the shared Groq quota for a while. Paused sources
+// are skipped entirely: no new-article fetching, no backlog summarization.
+// Their already-fetched articles stay visible on the site as-is.
+export interface SourceConfig {
+  disabledSources: string[];
+}
+
 export interface Env {
   NEXBRIEF_KV: KVNamespace;
   AI: Ai;

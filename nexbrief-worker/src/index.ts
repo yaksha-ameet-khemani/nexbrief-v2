@@ -10,8 +10,15 @@ import {
   RATE_LIMIT_PACING_MS,
   getLastRateLimitInfo,
 } from "./groq";
-import { loadArticles, saveArticles, existingUrlSet, loadMeta, saveMeta } from "./store";
-import { handleGetArticles, handleGetStatus, jsonResponse, corsPreflight, CORS_HEADERS } from "./api";
+import { loadArticles, saveArticles, existingUrlSet, saveMeta, loadSourceConfig } from "./store";
+import {
+  handleGetArticles,
+  handleGetStatus,
+  handlePostToggleSource,
+  jsonResponse,
+  corsPreflight,
+  CORS_HEADERS,
+} from "./api";
 import { translateToEnglish } from "./translate";
 
 // Sources whose articles also get an English title/summary generated via
@@ -74,6 +81,17 @@ export default {
       return jsonResponse({ status: "refresh started" });
     }
 
+    // Lets a source be paused/resumed from the /status page (e.g. to stop a
+    // source with a huge backlog from eating the shared Groq quota) without
+    // a redeploy. Gated by the same admin secret as /api/refresh.
+    if (url.pathname === "/api/sources/toggle" && request.method === "POST") {
+      const secret = request.headers.get("X-Refresh-Secret");
+      if (!env.REFRESH_SECRET || secret !== env.REFRESH_SECRET) {
+        return jsonResponse({ error: "Unauthorized" }, 401);
+      }
+      return handlePostToggleSource(request, env);
+    }
+
     return new Response("Not found", { status: 404, headers: CORS_HEADERS });
   },
 
@@ -90,9 +108,14 @@ async function runPipeline(env: Env): Promise<void> {
   console.log("Pipeline started...");
 
   let articles = await loadArticles(env);
+  const sourceConfig = await loadSourceConfig(env);
+  const disabledSources = new Set(sourceConfig.disabledSources);
+  if (disabledSources.size > 0) {
+    console.log(`Pipeline: Skipping disabled sources this run: ${[...disabledSources].join(", ")}`);
+  }
 
   console.log("Phase 0: Completing pending backlog summaries...");
-  const backlogResult = await processBacklog(env, articles);
+  const backlogResult = await processBacklog(env, articles, disabledSources);
   articles = backlogResult.articles;
   if (backlogResult.rateLimited) {
     console.warn("Phase 0: Rate limit hit during backlog processing. Continuing to Phase 1 anyway so new articles still get discovered (they'll just stay pending until a later run).");
@@ -102,7 +125,7 @@ async function runPipeline(env: Env): Promise<void> {
 
   console.log("Phase 1: Fetching RSS...");
   const existingUrls = existingUrlSet(articles);
-  const newRaw = interleaveBySource(await fetchAllFeeds(existingUrls));
+  const newRaw = interleaveBySource(await fetchAllFeeds(existingUrls, disabledSources));
   console.log(`Phase 1: Completed. ${newRaw.length} new articles found.`);
 
   console.log("Phase 2 + 3: Extracting content and summarizing new articles...");
@@ -203,8 +226,11 @@ async function runPipeline(env: Env): Promise<void> {
 async function processBacklog(
   env: Env,
   articles: Article[],
+  disabledSources: Set<string>,
 ): Promise<{ articles: Article[]; rateLimited: boolean; cleared: number }> {
-  const pending = articles.filter((a) => a.rawContent && a.summary == null);
+  const pending = articles.filter(
+    (a) => a.rawContent && a.summary == null && !disabledSources.has(a.source),
+  );
   if (pending.length === 0) {
     console.log("Phase 0: No backlog articles found.");
     return { articles, rateLimited: false, cleared: 0 };

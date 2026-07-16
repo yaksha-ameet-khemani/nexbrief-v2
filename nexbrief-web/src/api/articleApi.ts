@@ -30,3 +30,19 @@ export const fetchStatus = async (): Promise<StatusResponse> => {
   const response = await api.get<StatusResponse>("/status");
   return response.data;
 };
+
+// Admin-only: pauses/resumes a source in the pipeline. Requires the same
+// secret as the manual /api/refresh trigger — the caller is responsible for
+// prompting for/storing it, this just forwards it as a header.
+export const toggleSource = async (
+  source: string,
+  enabled: boolean,
+  secret: string,
+): Promise<{ disabledSources: string[] }> => {
+  const response = await api.post<{ disabledSources: string[] }>(
+    "/sources/toggle",
+    { source, enabled },
+    { headers: { "X-Refresh-Secret": secret } },
+  );
+  return response.data;
+};

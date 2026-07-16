@@ -146,10 +146,22 @@ async function fetchFeed(
   return results;
 }
 
-export async function fetchAllFeeds(existingUrls: Set<string>): Promise<FetchedArticle[]> {
+// Canonical list of every source the pipeline knows about, derived from
+// RSS_FEEDS so it can't drift out of sync — used to render/validate the
+// source-management table even for a source with zero cached articles.
+export const ALL_SOURCES: string[] = [...new Set(Object.values(RSS_FEEDS).map((m) => m.source))];
+
+export async function fetchAllFeeds(
+  existingUrls: Set<string>,
+  disabledSources: Set<string> = new Set(),
+): Promise<FetchedArticle[]> {
   const all: FetchedArticle[] = [];
 
   for (const [feedUrl, meta] of Object.entries(RSS_FEEDS)) {
+    if (disabledSources.has(meta.source)) {
+      console.log(`Phase 1 | Source: ${meta.source} | Skipped (disabled)`);
+      continue;
+    }
     try {
       const articles = await fetchFeed(feedUrl, meta, existingUrls);
       all.push(...articles);

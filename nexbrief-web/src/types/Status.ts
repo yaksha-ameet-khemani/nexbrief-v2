@@ -34,4 +34,5 @@ export interface StatusResponse {
   lastRunBacklogCleared: number | null;
   lastRunRateLimited: boolean | null;
   groqRateLimit: GroqRateLimitInfo | null;
+  disabledSources: string[];
 }

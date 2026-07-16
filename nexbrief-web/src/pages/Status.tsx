@@ -1,9 +1,15 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { fetchStatus } from "../api/articleApi";
+import { fetchStatus, toggleSource } from "../api/articleApi";
 import type { StatusResponse } from "../types/Status";
 import { SOURCE_LABELS } from "../types/Article";
 
 const AUTO_REFRESH_MS = 30_000;
+const ADMIN_SECRET_STORAGE_KEY = "nexbrief_admin_secret";
+
+function percentPending(total: number, pending: number): string {
+  if (total === 0) return "—";
+  return `${Math.round((pending / total) * 100)}%`;
+}
 
 function formatDateTime(iso: string | null): string {
   if (!iso) return "—";
@@ -46,6 +52,13 @@ export default function Status() {
   const [now, setNow] = useState(Date.now());
   const loadingRef = useRef(false);
 
+  const [adminSecret, setAdminSecret] = useState(
+    () => localStorage.getItem(ADMIN_SECRET_STORAGE_KEY) ?? "",
+  );
+  const [secretInput, setSecretInput] = useState("");
+  const [togglingSource, setTogglingSource] = useState<string | null>(null);
+  const [toggleError, setToggleError] = useState("");
+
   const load = useCallback(async () => {
     if (loadingRef.current) return; // avoid overlapping fetches if one is slow
     loadingRef.current = true;
@@ -76,6 +89,37 @@ export default function Status() {
     const clock = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(clock);
   }, []);
+
+  function unlockAdmin() {
+    if (!secretInput.trim()) return;
+    localStorage.setItem(ADMIN_SECRET_STORAGE_KEY, secretInput.trim());
+    setAdminSecret(secretInput.trim());
+    setSecretInput("");
+    setToggleError("");
+  }
+
+  function lockAdmin() {
+    localStorage.removeItem(ADMIN_SECRET_STORAGE_KEY);
+    setAdminSecret("");
+  }
+
+  async function handleToggle(source: string, currentlyDisabled: boolean) {
+    setTogglingSource(source);
+    setToggleError("");
+    try {
+      const result = await toggleSource(source, currentlyDisabled, adminSecret);
+      setStatus((prev) => (prev ? { ...prev, disabledSources: result.disabledSources } : prev));
+    } catch (err: any) {
+      if (err?.response?.status === 401) {
+        setToggleError("That secret was rejected — re-enter it below.");
+        lockAdmin();
+      } else {
+        setToggleError("Failed to update source. Please try again.");
+      }
+    } finally {
+      setTogglingSource(null);
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -225,7 +269,37 @@ export default function Status() {
             )}
 
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-              <h2 className="text-sm font-bold text-gray-800 mb-3">By source</h2>
+              <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
+                <h2 className="text-sm font-bold text-gray-800">By source</h2>
+                {adminSecret ? (
+                  <button
+                    onClick={lockAdmin}
+                    className="text-xs text-gray-400 hover:text-gray-600 underline"
+                  >
+                    Lock source controls
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="password"
+                      value={secretInput}
+                      onChange={(e) => setSecretInput(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && unlockAdmin()}
+                      placeholder="Admin secret to manage sources"
+                      className="text-xs border border-gray-200 rounded-full px-3 py-1.5 w-52 focus:outline-none focus:border-gray-400"
+                    />
+                    <button
+                      onClick={unlockAdmin}
+                      className="text-xs px-3 py-1.5 rounded-full bg-[#f5f5f5] text-[#3d3d3d] hover:bg-[#eaeaea] transition-colors"
+                    >
+                      Unlock
+                    </button>
+                  </div>
+                )}
+              </div>
+              {toggleError && (
+                <p className="text-xs text-red-500 mb-3">{toggleError}</p>
+              )}
               <div className="overflow-x-auto">
                 <table className="w-full text-sm text-left">
                   <thead>
@@ -234,17 +308,54 @@ export default function Status() {
                       <th className="py-2 pr-4 font-medium">Total</th>
                       <th className="py-2 pr-4 font-medium">Summarized</th>
                       <th className="py-2 pr-4 font-medium">Pending</th>
+                      <th className="py-2 pr-4 font-medium">% Pending</th>
+                      {adminSecret && <th className="py-2 pr-4 font-medium">Control</th>}
                     </tr>
                   </thead>
                   <tbody>
-                    {Object.entries(status.bySource).map(([source, stats]) => (
-                      <tr key={source} className="border-b border-gray-50 last:border-0">
-                        <td className="py-2 pr-4 text-gray-700">{SOURCE_LABELS[source] ?? source}</td>
-                        <td className="py-2 pr-4 text-gray-700">{stats.total}</td>
-                        <td className="py-2 pr-4 text-green-600">{stats.summarized}</td>
-                        <td className="py-2 pr-4 text-amber-600">{stats.pending}</td>
-                      </tr>
-                    ))}
+                    {Object.entries(status.bySource).map(([source, stats]) => {
+                      const isDisabled = status.disabledSources.includes(source);
+                      return (
+                        <tr
+                          key={source}
+                          className={`border-b border-gray-50 last:border-0 ${isDisabled ? "opacity-50" : ""}`}
+                        >
+                          <td className="py-2 pr-4 text-gray-700 flex items-center gap-2">
+                            {SOURCE_LABELS[source] ?? source}
+                            {isDisabled && (
+                              <span className="text-xs text-gray-500 bg-gray-100 rounded-full px-2 py-0.5">
+                                Paused
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2 pr-4 text-gray-700">{stats.total}</td>
+                          <td className="py-2 pr-4 text-green-600">{stats.summarized}</td>
+                          <td className="py-2 pr-4 text-amber-600">{stats.pending}</td>
+                          <td className="py-2 pr-4 text-amber-600">
+                            {percentPending(stats.total, stats.pending)}
+                          </td>
+                          {adminSecret && (
+                            <td className="py-2 pr-4">
+                              <button
+                                onClick={() => handleToggle(source, isDisabled)}
+                                disabled={togglingSource === source}
+                                className={`text-xs px-3 py-1 rounded-full transition-colors disabled:opacity-50 ${
+                                  isDisabled
+                                    ? "bg-green-50 text-green-700 hover:bg-green-100"
+                                    : "bg-red-50 text-red-700 hover:bg-red-100"
+                                }`}
+                              >
+                                {togglingSource === source
+                                  ? "…"
+                                  : isDisabled
+                                    ? "Enable"
+                                    : "Disable"}
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

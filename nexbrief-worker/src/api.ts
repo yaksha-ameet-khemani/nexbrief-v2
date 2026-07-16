@@ -1,5 +1,6 @@
 import type { Article, Env, PageResponse } from "./types";
-import { loadArticles, loadMeta } from "./store";
+import { loadArticles, loadMeta, loadSourceConfig, saveSourceConfig } from "./store";
+import { ALL_SOURCES } from "./feeds";
 
 export const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -86,12 +87,23 @@ interface PendingArticleSummary {
 // rate-limited, how much Groq quota is left (from the last captured response
 // headers), and when the next hourly cron run will fire.
 export async function handleGetStatus(env: Env): Promise<Response> {
-  const [articles, meta] = await Promise.all([loadArticles(env), loadMeta(env)]);
+  const [articles, meta, sourceConfig] = await Promise.all([
+    loadArticles(env),
+    loadMeta(env),
+    loadSourceConfig(env),
+  ]);
 
   const summarized = articles.filter((a) => a.summary != null).length;
   const pending = articles.length - summarized;
 
+  // Seeded from every known source (not just ones with cached articles) so a
+  // just-disabled or newly-empty source still shows up in the management
+  // table with a 0 row, rather than disappearing once its articles roll off
+  // the retention window.
   const bySource: Record<string, SourceStats> = {};
+  for (const source of ALL_SOURCES) {
+    bySource[source] = { total: 0, summarized: 0, pending: 0 };
+  }
   for (const a of articles) {
     const stats = (bySource[a.source] ??= { total: 0, summarized: 0, pending: 0 });
     stats.total++;
@@ -122,5 +134,39 @@ export async function handleGetStatus(env: Env): Promise<Response> {
     lastRunBacklogCleared: meta?.lastRunBacklogCleared ?? null,
     lastRunRateLimited: meta?.lastRunRateLimited ?? null,
     groqRateLimit: meta?.groqRateLimit ?? null,
+    disabledSources: sourceConfig.disabledSources,
   });
+}
+
+// Pauses/resumes a source from the /status page — a disabled source is
+// skipped entirely by the pipeline (no new-article fetching, no backlog
+// summarization), which is the actual lever for taking Groq-quota pressure
+// off the rest of the sources. Already-cached articles for that source are
+// untouched and keep showing on the site. Gated by X-Refresh-Secret at the
+// call site in index.ts, same as /api/refresh.
+export async function handlePostToggleSource(request: Request, env: Env): Promise<Response> {
+  let body: { source?: unknown; enabled?: unknown };
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse({ error: "Invalid JSON body" }, 400);
+  }
+
+  const { source, enabled } = body;
+  if (typeof source !== "string" || !ALL_SOURCES.includes(source)) {
+    return jsonResponse({ error: `Unknown source. Must be one of: ${ALL_SOURCES.join(", ")}` }, 400);
+  }
+  if (typeof enabled !== "boolean") {
+    return jsonResponse({ error: "'enabled' must be a boolean" }, 400);
+  }
+
+  const config = await loadSourceConfig(env);
+  const disabled = new Set(config.disabledSources);
+  if (enabled) disabled.delete(source);
+  else disabled.add(source);
+
+  const updated = { disabledSources: [...disabled] };
+  await saveSourceConfig(env, updated);
+
+  return jsonResponse({ source, enabled, disabledSources: updated.disabledSources });
 }
