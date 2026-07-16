@@ -2,7 +2,7 @@
 
 *A detailed walkthrough of what this project is, why every technology in it was chosen, how the pieces fit together, and the real problems we ran into while building it. Written so that someone with little to no experience in web development or cloud infrastructure can read it top to bottom and actually understand — not just copy — what happened here.*
 
-Last updated: 2026-07-10
+Last updated: 2026-07-16
 
 ---
 
@@ -24,7 +24,7 @@ Last updated: 2026-07-10
 
 ## 1. What This Project Is
 
-NexBrief is a personal news aggregator. It automatically pulls the latest articles from five news sources (cricket, general news, automobiles, and technology), reads the full article, uses an AI model to write a short summary of it, and generates ready-to-click "search this topic elsewhere" links (Google News, Cricbuzz, TechCrunch, etc. depending on the topic). The user opens one website and gets a digest of news across multiple beats, pre-summarized, without having to visit five different news sites.
+NexBrief is a personal news aggregator. It automatically pulls the latest articles from six news sources (cricket, general news, automobiles, and technology — one of the general-news sources, BBC Urdu, is in Urdu and gets machine-translated to English before the site ever shows it), reads the full article, uses an AI model to write a short summary of it, and generates ready-to-click "search this topic elsewhere" links (Google News, Cricbuzz, TechCrunch, etc. depending on the topic). The user opens one website and gets a digest of news across multiple beats, pre-summarized, without having to visit six different news sites.
 
 **This document describes `NexBrief-v2`** — a from-scratch rebuild of an earlier version of this same idea (`NexBrief`, the original), redesigned specifically to be:
 
@@ -96,11 +96,13 @@ Instead of "no backend at all," the actual design is: **keep the React frontend,
                              ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  nexbrief-worker (Cloudflare Worker — serverless function)    │
-│  1. Fetch RSS feeds (5 news sources)                          │
-│  2. Scrape full article text from each article's own page     │
-│  3. Ask Groq's AI to summarize each article                   │
-│  4. Ask Groq's AI for a short search query + build search links│
-│  5. Save everything into a single shared cache                │
+│  1. Fetch RSS feeds (6 news sources)                          │
+│  2. (BBC Urdu only) Translate title/description to English    │
+│  3. Scrape full article text from each article's own page     │
+│  4. (BBC Urdu only) Translate the scraped content too         │
+│  5. Ask Groq's AI to summarize each article (in English)       │
+│  6. Ask Groq's AI for a short search query + build search links│
+│  7. Save everything into a single shared cache                │
 └───────────────────────────┬─────────────────────────────────┘
                              │ writes to
                              ▼
@@ -223,7 +225,7 @@ This section goes through *every* tool, platform, or technology involved in this
 
 **What it is**: A long-standing, standardized web format (XML-based) that news sites and blogs publish, listing their most recent articles with a title, short description, publish date, and a link — specifically designed for other software to consume automatically (as opposed to a regular webpage, meant for humans reading in a browser).
 
-**Why we used it**: It's the standard, official way to get a live feed of "what's new" from a news site without having to scrape the entire homepage — every source used (ESPNCricinfo, Dainik Bhaskar, Autocar India, Gadgets360, BBC) publishes one.
+**Why we used it**: It's the standard, official way to get a live feed of "what's new" from a news site without having to scrape the entire homepage — every source used (ESPNCricinfo, Dainik Bhaskar, Autocar India, Gadgets360, BBC, BBC Urdu) publishes one.
 
 ### 5.15 Groq (the AI API)
 
@@ -231,25 +233,31 @@ This section goes through *every* tool, platform, or technology involved in this
 
 **Why we used it**: It's what turns the raw scraped article text into a short, readable summary, and separately, into a short "search query" used to build the "search this elsewhere" links. This project specifically uses the `llama-3.3-70b-versatile` model via Groq — chosen in the original project (we kept the same choice), offering a solid balance of quality and speed on Groq's free tier.
 
-### 5.16 Git and GitHub
+### 5.16 Cloudflare Workers AI
+
+**What it is**: Cloudflare's own hosted AI inference platform — similar in spirit to Groq (send it input, get back a model's output), but running different models and billed/rate-limited completely separately from Groq. It's accessed from inside a Worker via a binding (declared in `wrangler.toml`'s `[ai]` block) rather than an API key.
+
+**Why we used it**: BBC Urdu's articles arrive in Urdu, and the whole site is meant to read in English. Rather than adding a second Groq-based translation step (which would compete with summarization for Groq's already-tight rate limit — see [Section 7.4](#74-pacing-ai-calls-to-avoid-hitting-the-rate-limit-early) and [8.11](#811-disabling-a-source-didnt-fix-the-backlog-because-the-real-bottleneck-was-somewhere-else)), we used Workers AI's translation model (`@cf/meta/m2m100-1.2b`) instead — a genuinely separate free-tier quota on the same Cloudflare account, so translating BBC Urdu never eats into the budget available for summarizing every other source.
+
+### 5.17 Git and GitHub
 
 **What it is**: Git is a *version control system* — software that tracks every change ever made to a project's files, letting you see history, undo mistakes, and collaborate without overwriting each other's work. GitHub is a website that hosts Git projects ("repositories") online, adds collaboration features (pull requests, issues), and — critically for this project — can trigger automated actions (like a deployment) whenever code is pushed.
 
 **Why we used it**: Beyond just version-controlling the code (valuable on its own), pushing code to GitHub is the trigger that makes both the frontend and the Worker redeploy automatically — see GitHub Actions and Cloudflare Workers Builds above/below.
 
-### 5.17 GitHub Actions
+### 5.18 GitHub Actions
 
 **What it is**: GitHub's built-in automation system — you write a "workflow" file describing a sequence of steps to run automatically in response to an event (like "code was pushed to the main branch"), and GitHub runs those steps on a temporary virtual machine it spins up for you.
 
 **Why we used it**: The frontend auto-deploys via Cloudflare's own Git integration, but the Worker backend doesn't have that built in the same way — so we wrote a small GitHub Actions workflow (`.github/workflows/deploy-worker.yml`) that automatically runs `wrangler deploy` whenever Worker code changes get pushed, so both halves of the project redeploy themselves without any manual step.
 
-### 5.18 GitHub Personal Access Tokens (PATs)
+### 5.19 GitHub Personal Access Tokens (PATs)
 
 **What it is**: A long random string that acts like a password specifically scoped to let a tool (like the `git` command line, or an automated script) act on your behalf on GitHub, without using your actual account password (GitHub no longer accepts real passwords for this kind of access at all). You choose exactly what permissions ("scopes") the token grants — e.g., just read/write access to repositories, or also permission to manage GitHub Actions workflow files.
 
 **Why we used it**: Needed so that `git push` from the command line could authenticate as the user without them re-entering a password (which GitHub doesn't even support for this anymore) — and specifically needed the `workflow` scope in addition to the basic `repo` scope, because pushing changes to a `.github/workflows/` file requires that extra explicit permission (a deliberate GitHub safety measure, since workflow files can run arbitrary automated code).
 
-### 5.19 Cloudflare API Tokens
+### 5.20 Cloudflare API Tokens
 
 **What it is**: Similar concept to a GitHub PAT, but for authenticating *into Cloudflare's* API instead — a scoped credential that lets an external tool (in this case, the GitHub Action) deploy things to a Cloudflare account without needing the actual account login/password.
 
@@ -259,12 +267,13 @@ This section goes through *every* tool, platform, or technology involved in this
 
 ## 6. How Data Actually Flows Through the System
 
-Every hour (and also whenever manually triggered for testing), the Worker runs a pipeline with four phases, directly inspired by the original Java backend's design:
+Every hour (and also whenever manually triggered for testing), the Worker runs a pipeline with several phases, directly inspired by the original Java backend's design (with two phases added since — normalization and auto-pause — that the original never needed):
 
-1. **Phase 0 — Clear the backlog.** Before doing anything new, check for any articles from a *previous* run that got scraped but never got an AI summary (usually because Groq's rate limit was hit mid-run last time). Try to finish summarizing those first.
-2. **Phase 1 — Fetch RSS.** Pull the latest items from all 5 RSS feeds, skipping any article URL we've already seen before (so the same article never gets processed twice).
-3. **Phase 2 — Scrape.** For each genuinely new article, fetch its actual webpage and extract the full article text using source-specific rules (different news sites structure their HTML differently, so each source has its own set of CSS selectors to try, with generic fallbacks if those don't match).
-4. **Phase 3 — Summarize.** Send the extracted text to Groq, asking for a short summary; then send the title + summary to Groq again, asking for a short search phrase, which is used to build a set of ready-made search links (different link sets depending on whether the article is about cricket, cars, tech, or general news).
+1. **Phase -1 — Normalize any leftover non-English articles.** Scan the *entire* stored article list (not just pending ones) for any BBC Urdu article that hasn't been translated to English yet — whether it's still awaiting a summary or was already summarized before this behavior existed — and translate it in place. This is what let the ~50 already-cached Urdu articles catch up to English without writing a separate one-off migration script.
+2. **Phase 0 — Clear the backlog.** Check for any articles from a *previous* run that got scraped but never got an AI summary (usually because Groq's rate limit was hit mid-run last time), skipping any source that's currently manually disabled. Try to finish summarizing those first.
+3. **Phase 1 — Fetch RSS.** Pull the latest items from all 6 RSS feeds, skipping any article URL we've already seen before (so the same article never gets processed twice) and skipping any source that's manually disabled *or* automatically paused (see [Section 7.10](#710-a-per-source-circuit-breaker-not-just-a-manual-switch)). BBC Urdu's title, description, and content get translated to English immediately here, before anything else touches them.
+4. **Phase 2 — Scrape.** For each genuinely new article, fetch its actual webpage and extract the full article text using source-specific rules (different news sites structure their HTML differently, so each source has its own set of CSS selectors to try, with generic fallbacks if those don't match).
+5. **Phase 3 — Summarize.** Send the extracted text to Groq, asking for a short summary (in English, even for BBC Urdu, since by this point the content has already been translated); then send the title + summary to Groq again, asking for a short search phrase, which is used to build a set of ready-made search links (different link sets depending on whether the article is about cricket, cars, tech, or general news).
 
 Everything — new and old — gets merged together, trimmed to the last 5 days (so old articles eventually roll off), and written back to the single KV blob.
 
@@ -301,6 +310,24 @@ The pipeline originally only wrote its results to storage once, right at the ver
 ### 7.7 Show everything cached by default; the date picker is opt-in, not a default filter
 
 The original design (ported faithfully from the Java backend) defaulted to showing only *today's* articles unless a filter was applied. In practice this made the site feel oddly empty, especially early in the day before the hourly cron had pulled much in — directly working against the whole point of caching several days of content. The fix, based on direct user feedback, was to stop defaulting to "today" at all: with no date picked, the site shows everything currently sitting in the 5-day KV retention window, and picking a date narrows it down as an explicit, opt-in choice rather than a hidden default. This also happened to force a cleanup of a real bug in how filters combined — see [Problem 8.10](#810-filters-that-were-supposed-to-work-together-were-silently-replacing-each-other).
+
+### 7.8 Round-robin processing across sources, not strictly source-by-source
+
+Both the backlog-retry loop and the new-article loop originally processed sources in a fixed order (all of ESPNCricinfo, then all of Dainik Bhaskar, and so on). Since a run rarely gets through every article it finds before hitting Groq's rate limit, whichever source came *last* in that fixed order could go entire runs without being reached at all if the earlier sources kept generating enough articles to consume the whole per-run budget first — this was caught directly with BBC Urdu (added last), which sat at just 1–2 total articles for hours despite its RSS feed clearly having fresh items every run. The fix: interleave one article from each source before moving to the next round, so every source gets an early turn regardless of where it sits in the source list.
+
+A second, more subtle version of the same starvation bug showed up afterward: Phase 0 (backlog) hitting the rate limit caused the *entire* pipeline to return early, skipping Phase 1 (new-article discovery) for that whole run — not just deprioritizing it. A large pre-existing backlog kept tripping the rate limit run after run, which meant BBC Urdu's fast-moving feed never even got a *chance* to be fetched, because Phase 1 never ran at all while Phase 0 was still stuck. Fixed by always running Phase 1 regardless of Phase 0's outcome — new articles get scraped and saved as pending (skipping the Groq call if a rate limit is already known this run) rather than never being discovered in the first place.
+
+### 7.9 BBC Urdu is translated *before* anything else happens to it, not after
+
+The first version of BBC Urdu support let Groq summarize the article in Urdu, then made a separate call afterward (via Cloudflare Workers AI) to produce an English `titleEn`/`summaryEn` pair, shown behind an opt-in "Translate to English" toggle on the card. This meant native Urdu was still the *default* — visible immediately for any article still waiting on its AI summary, and only replaced by English if a visitor clicked the toggle.
+
+Per explicit user feedback that no Urdu should appear on the site at all, even transiently, the pipeline was restructured so translation happens *first*: title, RSS description, and scraped article body are all translated to English immediately after fetch, before scraping even finishes and well before Groq is ever called. Groq then summarizes the already-English text directly, so the summary comes out in English natively — there's no native-language summary to translate afterward, and nothing for a toggle to switch back to, so the toggle was removed entirely. A small migration function (`normalizeTranslatedSources`, [Section 6](#6-how-data-actually-flows-through-the-system)'s Phase -1) sweeps the whole article store on every run for anything not yet marked English, so the ~50 articles already cached under the old design self-heal to English over a few runs without a dedicated backfill script.
+
+### 7.10 A per-source circuit breaker, not just a manual switch
+
+A large backlog on one source (BBC News, which had grown to roughly 60% pending) turned into a natural next question: could a source be temporarily paused? A manual enable/disable toggle was added first (an admin-secret-gated button per source on `/status`), and disabling BBC did freeze its backlog as intended — but a follow-up comparison a few hours later showed the *other* sources' pending percentages had gotten worse anyway, not better. The real bottleneck turned out to be Groq's per-minute token budget (small enough that a single long article's summarization call can exhaust it and trigger a 429), which no amount of picking-which-sources-compete-for-it was going to fix on its own — see [Problem 8.11](#811-disabling-a-source-didnt-fix-the-backlog-because-the-real-bottleneck-was-somewhere-else).
+
+So a second, automatic mechanism was added on top of the manual toggle: any non-disabled source whose own pending count exceeds a threshold (5) automatically stops having new articles fetched for it, while Phase 0 keeps clearing its existing backlog exactly as normal — so it resumes fetching on its own, with no admin action needed, the moment that source's backlog drops back under the line. The manual toggle and the automatic one are deliberately independent and shown as distinct badges ("Paused" vs. "Auto-paused") on `/status`, since they answer different questions: "I've decided to turn this off" versus "the system decided this needs to cool down for a bit."
 
 ---
 
@@ -358,6 +385,16 @@ The fix: rewrite the filtering as a sequence of independent, optional conditions
 
 **Lesson**: when several filters are meant to work *together* (narrowing a result set jointly), implementing them as a chain of `if / else if` — where only one branch ever runs — is an easy, easy-to-miss mistake, because each individual branch looks completely correct in isolation; the bug only shows up in how the branches interact (or fail to). It's also a good example of how copying working logic from one codebase into another can carry over a design flaw that nobody happened to notice in the original, simply because nobody had used it in a way that exposed it yet.
 
+### 8.11 Disabling a source didn't fix the backlog, because the real bottleneck was somewhere else
+
+BBC News's backlog had grown to roughly 60% pending — clearly the worst of the six sources — so the obvious-seeming fix was to disable it, freeing up Groq's rate-limit budget for everyone else. It was disabled via the new manual toggle, and it worked exactly as designed: BBC's own pending count froze in place. But a comparison taken about 5–6 hours later showed the *other* five sources had all gotten worse in the meantime, not better — the overall pending percentage across the whole site actually went up, from 38% to 43%.
+
+The instinct "disabling the worst offender should free up quota for everyone else" turned out to rest on an assumption that wasn't true here: that sources were mainly competing *with each other* for a shared budget. Looking at the actual numbers told a different story — the last run had been rate-limited again, having cleared only 4 backlog articles while 15 new ones had arrived, and the Groq quota snapshot captured at the moment of that rate limit showed the *token* budget (not the request budget) sitting at its full limit, exhausted in essentially one call. Groq's free tier enforces a small **per-minute token budget**, easily used up by a single long article's summarization request — which meant almost every hourly run was going to get rate-limited after clearing only a handful of articles, regardless of which sources were competing for that budget. Disabling BBC changed *who* was competing for the scraps, not how many scraps there were.
+
+The actual fix layered a second mechanism on top of the manual toggle rather than replacing it: an automatic per-source circuit breaker (see [Section 7.10](#710-a-per-source-circuit-breaker-not-just-a-manual-switch)) that stops a source from fetching new articles once its own backlog gets too deep, so no single source's inflow can keep outrunning the shared, genuinely-scarce processing budget — a problem a manual "pick a source to disable" lever can't solve on its own, because the ceiling is on total throughput, not on any one source's fair share of it.
+
+**Lesson**: a plausible-sounding fix ("the worst offender is competing for the same resource, so remove it") is worth actually verifying against real before/after numbers rather than assuming it worked because it made intuitive sense — the actual constraint here (a small per-minute token ceiling) wasn't visible from the symptom alone (one source's backlog looking worse than the others), only from checking the underlying rate-limit data and comparing system-wide numbers over time, not just the one source that prompted the question.
+
 ---
 
 ## 9. Glossary — Terms Explained Simply
@@ -365,6 +402,7 @@ The fix: rewrite the filtering as a sequence of independent, optional conditions
 - **API (Application Programming Interface)**: A defined way for one piece of software to ask another piece of software to do something or hand back data — e.g., "give me the current weather" — usually over the internet using HTTP.
 - **API key**: A secret password-like string that identifies who's making a request to an API, so the provider knows who to bill or restrict.
 - **Background task (`waitUntil`)**: Work a serverless function keeps doing *after* it has already sent back its response, instead of making whoever's waiting sit through the whole thing. Cloudflare Workers offer this via `ctx.waitUntil(...)`, but it comes with a limited extra time budget — if the background work doesn't finish before that runs out, the platform cancels it outright, with no error to catch. See [Problem 8.9](#89-a-background-task-was-silently-getting-killed-and-throwing-away-completed-work).
+- **Circuit breaker**: A pattern where a system automatically stops doing something once a condition gets bad enough (here: a source stops fetching new articles once its own backlog gets too deep), and automatically resumes once that condition improves — without a person needing to notice and flip a switch. See [Section 7.10](#710-a-per-source-circuit-breaker-not-just-a-manual-switch).
 - **CORS (Cross-Origin Resource Sharing)**: A browser security rule blocking a webpage from freely making requests to a different website's server unless that server explicitly allows it. See [Section 3.1](#31-cors-blocks-a-browser-from-fetching-most-other-websites-data).
 - **Cron job / Cron trigger**: A way of scheduling code to run automatically at specific times or intervals, without a person manually starting it.
 - **CSS selector**: A pattern used to identify specific elements on a webpage (e.g., "the `<div>` with class `article-body`"), used both for styling and, here, for extracting specific content while scraping.
@@ -379,7 +417,7 @@ The fix: rewrite the filtering as a sequence of independent, optional conditions
 - **SPA (Single-Page Application)**: A website that loads one HTML page and then uses JavaScript to change what's displayed as the user navigates, rather than requesting a whole new page from the server every time.
 - **Static site**: A website made of plain, pre-built files (HTML/CSS/JS) with no server-side code running — extremely cheap and simple to host, but can't do anything requiring secret credentials or scheduled background work on its own.
 - **TypeScript type-checking**: The process of verifying, before code ever runs, that the *shapes* of data being passed around match what each piece of code expects.
-- **Version control (Git)**: A system for tracking every change made to a project's code over time. See [Section 5.16](#516-git-and-github).
+- **Version control (Git)**: A system for tracking every change made to a project's code over time. See [Section 5.17](#517-git-and-github).
 
 ---
 
@@ -398,6 +436,9 @@ The fix: rewrite the filtering as a sequence of independent, optional conditions
 - **Small, easy-to-dismiss UI observations (like "this page doesn't scroll but that one does") are often the first visible symptom of a real underlying bug** — the person actually using the product day to day will often notice these inconsistencies before anyone reviewing the code would, simply because they're the one clicking through every combination of filters/states in the course of normal use.
 - **A chain of `if / else if` conditions means "pick exactly one," which is the wrong shape whenever the real intent is "apply whichever of these are active, together"** — each individual condition can look perfectly correct on its own while the overall behavior is still wrong, because the bug lives in how the branches exclude each other, not in any single branch.
 - **Defaults matter as much as the features themselves** — a feature (a date filter) can be implemented perfectly and still make the product feel worse if the *default* state it starts in doesn't match what most users actually want to see first.
+- **"Process things fairly" and "process things in the order they arrived" are not the same goal, and a fixed processing order quietly picks the second one even when you meant the first** — a strict source-by-source order looks perfectly reasonable until whichever source sits last in that order starts starving, and the fix (round-robin interleaving) only becomes obvious once you're looking for "is every group getting an early turn," not just "is the code doing what it says."
+- **A fix that makes intuitive sense is still worth checking against real before/after numbers** — disabling the single worst-looking source felt like the obvious lever to pull, and it worked exactly as designed for that one source, while the system-wide number it was supposed to improve got worse anyway, because the actual constraint (Groq's per-minute token budget) wasn't about which sources competed for it at all (see [Problem 8.11](#811-disabling-a-source-didnt-fix-the-backlog-because-the-real-bottleneck-was-somewhere-else)).
+- **An automatic circuit breaker beats a manual switch for a problem that recurs on its own** — a manual per-source toggle is useful for "I've decided this should stop," but a condition that can quietly recur on any source, at any time, without anyone watching (a backlog creeping past a healthy size) is better served by a mechanism that both engages *and disengages* itself, so fixing it doesn't depend on someone noticing and remembering to flip it back.
 
 ---
 

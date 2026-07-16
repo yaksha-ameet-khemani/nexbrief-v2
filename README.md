@@ -1,6 +1,6 @@
 # NexBrief
 
-A personal news aggregator that automatically pulls the latest articles from five news sources, scrapes the full article text, summarizes each one with AI, and generates ready-to-click "search this elsewhere" links — all refreshed automatically every hour, with **no database and no server to keep running**.
+A personal news aggregator that automatically pulls the latest articles from six news sources, scrapes the full article text, summarizes each one with AI, and generates ready-to-click "search this elsewhere" links — all refreshed automatically every hour, with **no database and no server to keep running**. One source (BBC Urdu) is translated to English before anything else happens to it, so the whole site reads in English regardless of a source's native language.
 
 **🔴 Live**: [nexbrief-v2.ameettechademy.workers.dev](https://nexbrief-v2.ameettechademy.workers.dev) · [Status page](https://nexbrief-v2.ameettechademy.workers.dev/status)
 
@@ -16,11 +16,13 @@ For current live operational status (what's deployed, where, and known limitatio
 
 ## Features
 
-- 📰 Aggregates news from 5 sources: ESPNCricinfo (cricket), Dainik Bhaskar (general, Hindi), Autocar India (automobile), Gadgets360 (technology), and BBC News (general)
+- 📰 Aggregates news from 6 sources: ESPNCricinfo (cricket), Dainik Bhaskar (general, Hindi), Autocar India (automobile), Gadgets360 (technology), BBC News (general), and BBC Urdu (general, translated to English)
+- 🌐 BBC Urdu is translated to English immediately after fetch — before scraping, summarizing, or display — via Cloudflare Workers AI, so nothing native ever reaches the site, even for articles still awaiting their AI summary
 - 🤖 AI-generated summaries for every article (via Groq, using `llama-3.3-70b-versatile`)
 - 🔗 Auto-generated, category-aware "search this elsewhere" links (Cricbuzz/ESPNCricinfo for cricket, TechCrunch/The Verge for tech, etc.)
 - 🔄 Fully automatic hourly refresh — no manual intervention, no visitor-triggered fetching
-- 📊 A `/status` page showing pipeline health: article counts, last/next run time, Groq quota remaining
+- 🚦 Per-source circuit breaker: a source automatically stops fetching new articles once its own unsummarized backlog gets too deep, and resumes on its own once it's cleared — plus an admin-only manual enable/disable toggle per source, both surfaced on `/status`
+- 📊 A `/status` page showing pipeline health: article counts (with a %-pending column per source), last/next run time, Groq quota remaining, and source-level pause controls
 - 🗂️ Filter by date, category, source, or keyword search
 - 💸 Runs entirely on free-tier cloud infrastructure — no database, no always-on server
 
@@ -37,6 +39,7 @@ For current live operational status (what's deployed, where, and known limitatio
 | HTML parsing | Cloudflare `HTMLRewriter` | Native streaming HTML parser for article scraping |
 | XML parsing | `fast-xml-parser` | Parses RSS feeds into JS objects |
 | AI summarization | Groq API (`llama-3.3-70b-versatile`) | Fast, free-tier-friendly LLM access, OpenAI-compatible API |
+| Translation | Cloudflare Workers AI (`@cf/meta/m2m100-1.2b`) | Translates BBC Urdu to English; a separate free-tier quota from Groq, so it doesn't compete with summarization for rate-limit budget |
 | Hosting (frontend) | Cloudflare Workers Builds | Git-connected, auto-deploys on push |
 | Hosting (backend) | Cloudflare Workers + GitHub Actions | Auto-deploys via `wrangler deploy` on push |
 | CI/CD | GitHub Actions | Automated Worker deployment on push |
@@ -50,11 +53,13 @@ Cloudflare Cron Trigger (hourly)
         │
         ▼
 nexbrief-worker (Cloudflare Worker)
-  1. Fetch RSS from 5 sources
-  2. Scrape full article text
-  3. Summarize via Groq AI
-  4. Generate search query + links via Groq AI
-  5. Save to shared cache
+  1. Fetch RSS from 6 sources
+  2. (BBC Urdu only) Translate title/description to English via Workers AI
+  3. Scrape full article text
+  4. (BBC Urdu only) Translate scraped content too
+  5. Summarize via Groq AI (in English, for every source)
+  6. Generate search query + links via Groq AI
+  7. Save to shared cache
         │
         ▼
 Cloudflare Workers KV (shared cache, all visitors read the same data)
@@ -81,22 +86,25 @@ NexBrief-v2/
 ├── .github/workflows/
 │   └── deploy-worker.yml        ← auto-deploys nexbrief-worker on push
 ├── nexbrief-worker/              Cloudflare Worker (backend)
-│   ├── wrangler.toml             KV binding, cron schedule, config
+│   ├── wrangler.toml             KV + Workers AI bindings, cron schedule, config
 │   └── src/
 │       ├── index.ts              Entry point: fetch handler + scheduled pipeline
 │       ├── feeds.ts              RSS feed config + parsing
 │       ├── scrape.ts             Article content extraction
 │       ├── groq.ts               AI summarization + search link generation
-│       ├── store.ts              KV read/write logic
-│       ├── api.ts                Read API (filtering, pagination, status)
+│       ├── translate.ts          English translation via Cloudflare Workers AI
+│       ├── store.ts              KV read/write logic (articles, meta, per-source config)
+│       ├── api.ts                Read API (filtering, pagination, status, source toggle)
+│       ├── constants.ts          Shared tuning constants (e.g. auto-pause threshold)
 │       └── types.ts              Shared TypeScript types
 └── nexbrief-web/                 React frontend
     ├── wrangler.toml              Static asset deployment config
     └── src/
         ├── pages/
-        │   ├── Home.tsx           Main article feed
-        │   └── Status.tsx         Pipeline health dashboard
-        ├── components/            ArticleCard, Navbar, SourceSection
+        │   ├── Home.tsx           Main article feed (hero + sliding carousel + date-sorted grid)
+        │   ├── SourceDetail.tsx   Per-source article view
+        │   └── Status.tsx         Pipeline health dashboard + source admin controls
+        ├── components/            ArticleCard, ArticleListItem, Hero, NewsCarousel, Navbar
         ├── api/articleApi.ts      Backend API client
         └── types/                 Shared TypeScript types
 ```
@@ -155,7 +163,7 @@ Returns a paginated list of articles. All filters below are optional and combine
 | Query param | Type | Description |
 |---|---|---|
 | `keyword` | string | Full-text search in title/description |
-| `source` | string | Filter by source (`espncricinfo`, `bhaskar`, `autocarindia`, `gadgets360`, `bbc`) |
+| `source` | string | Filter by source (`espncricinfo`, `bhaskar`, `autocarindia`, `gadgets360`, `bbc`, `bbcurdu`) |
 | `category` | string | Filter by category (`cricket`, `automobile`, `technology`, `general`) |
 | `date` | string (`YYYY-MM-DD`) | Filter by publish date (omit to show all cached articles) |
 | `page` | number | Page number, 0-indexed (default `0`) |
@@ -163,17 +171,22 @@ Returns a paginated list of articles. All filters below are optional and combine
 
 ### `GET /api/status`
 
-Returns pipeline health: article counts (total/summarized/pending, overall and per-source), the titles of currently-pending articles, last/next run time, whether the last run hit a rate limit, and Groq's remaining quota. Powers the `/status` page, which auto-refreshes every 30s.
+Returns pipeline health: article counts (total/summarized/pending, overall and per-source), the titles of currently-pending articles, last/next run time, whether the last run hit a rate limit, Groq's remaining quota, which sources are manually disabled (`disabledSources`), and which sources are automatically paused for having too deep a backlog (`autoPausedSources`, `autoPauseThreshold`). Powers the `/status` page, which auto-refreshes every 30s.
 
 ### `POST /api/refresh`
 
 Manually triggers the fetch/scrape/summarize pipeline immediately, instead of waiting for the hourly cron. Requires an `X-Refresh-Secret` header matching the configured `REFRESH_SECRET`.
 
+### `POST /api/sources/toggle`
+
+Manually enables or disables a source. Body: `{"source": "<source key>", "enabled": true|false}`. A disabled source is skipped entirely — no new-article fetching, no backlog summarization — until re-enabled; its already-cached articles keep showing on the site unchanged. Requires the same `X-Refresh-Secret` header as `/api/refresh`. Exposed on the `/status` page behind an admin-secret unlock field rather than requiring direct API calls.
+
 ## Known limitations
 
 - ESPNCricinfo and Gadgets360 block scraping requests from Cloudflare's IP ranges (403 responses) — worked around by falling back to the RSS description for AI summarization on those sources.
-- Groq's free-tier rate limit means a large batch of new articles can take a couple of hours to all get real AI summaries (via automatic backlog retry on subsequent hourly runs) — articles are never hidden while waiting, they show with a "preview" (RSS description) in the meantime.
+- Groq's free-tier rate limit is a small per-minute token budget that a single long article can exhaust in one call — a large batch of new articles can take a while to all get real AI summaries (via automatic backlog retry on subsequent hourly runs, plus the per-source auto-pause circuit breaker described above). Articles are never hidden while waiting, they show with a "preview" (RSS description) in the meantime.
 - A background-task time limit was silently discarding completed work on interrupted runs — fixed by saving each article immediately instead of batching the save until the end.
+- Migrating already-cached BBC Urdu articles to English (for anything fetched before the translate-first design shipped) happens gradually across several hourly runs rather than all at once, since each article needs a few sequential translation calls — expect a handful of native-language stragglers for a while after that change, not indefinitely.
 
 See [`STATUS.md`](./STATUS.md#known-limitations) for the current, up-to-date list.
 
@@ -185,4 +198,4 @@ See [`STATUS.md`](./STATUS.md#known-limitations) for the current, up-to-date lis
 
 ## Acknowledgments
 
-News content is sourced from the RSS feeds of ESPNCricinfo, Dainik Bhaskar, Autocar India, Gadgets360, and BBC News — all rights to article content belong to the respective publishers; NexBrief only links to and summarizes their public RSS feeds. AI summarization powered by [Groq](https://groq.com). Built with assistance from Claude Code.
+News content is sourced from the RSS feeds of ESPNCricinfo, Dainik Bhaskar, Autocar India, Gadgets360, BBC News, and BBC Urdu — all rights to article content belong to the respective publishers; NexBrief only links to and summarizes their public RSS feeds. AI summarization powered by [Groq](https://groq.com); translation powered by Cloudflare Workers AI. Built with assistance from Claude Code.
