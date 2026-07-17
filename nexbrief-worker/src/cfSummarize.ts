@@ -5,7 +5,9 @@ import type { Env } from "./types";
 // BBC Urdu translation, see translate.ts), used as a fallback once Groq's
 // per-minute token budget is exhausted for the run instead of leaving an
 // article pending until the next hourly cycle.
-const CF_SUMMARY_MODEL = "@cf/meta/llama-3.1-8b-instruct";
+// llama-3.1-8b-instruct (unqualified) was deprecated 2026-05-30 — this is
+// its currently-active replacement per Cloudflare's model catalog.
+const CF_SUMMARY_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
 
 // Mirrors groq.ts's LANGUAGE_INSTRUCTIONS so a Cloudflare-summarized article
 // reads the same as a Groq-summarized one from the same source.
