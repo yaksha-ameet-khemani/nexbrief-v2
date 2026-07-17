@@ -23,6 +23,9 @@ export default function ArticleCard({ article }: ArticleCardProps) {
   // article still shows up instead of being hidden until it's polished.
   const isAiSummary = article.summary != null;
   const summaryText = article.summary ?? article.description;
+  // Devanagari reads smaller than Latin script at the same pixel size, so
+  // Hindi articles (bhaskar) get a 2-step bump on the Tailwind text scale.
+  const isHindi = article.language === "hi";
 
   return (
     <div className="bg-white hover:bg-[#f5f5f5]/60 transition-colors overflow-hidden">
@@ -43,7 +46,9 @@ export default function ArticleCard({ article }: ArticleCardProps) {
       {/* Content */}
       <div className="p-4 flex flex-col gap-3">
         {/* Title */}
-        <h3 className="text-sm text-[#1f1f1f] leading-snug line-clamp-2">
+        <h3
+          className={`${isHindi ? "text-lg" : "text-sm"} text-[#1f1f1f] leading-snug line-clamp-2`}
+        >
           {article.title}
         </h3>
 
@@ -71,7 +76,9 @@ export default function ArticleCard({ article }: ArticleCardProps) {
                   : "Read Preview ▼"}
             </button>
             {showSummary && (
-              <div className="mt-2 text-xs text-[#3d3d3d] leading-relaxed bg-blue-50 rounded-lg p-3">
+              <div
+                className={`mt-2 ${isHindi ? "text-base" : "text-xs"} text-[#3d3d3d] leading-relaxed bg-blue-50 rounded-lg p-3`}
+              >
                 {!isAiSummary && (
                   <p className="text-blue-400 italic mb-1">
                     AI summary pending — showing quick preview

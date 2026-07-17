@@ -6,14 +6,18 @@ interface NewsCarouselProps {
 
 // Seconds of animation per card — tuned so the strip reads as a steady
 // drift rather than a race, regardless of how many articles feed it.
-const SEC_PER_CARD = 3;
-const MIN_DURATION = 24;
+const SEC_PER_CARD = 5;
+const MIN_DURATION = 40;
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 }
 
 function Card({ article }: { article: Article }) {
+  // Matches ArticleCard's title size (text-sm) — this was previously text-xs,
+  // a step smaller than the main grid for no reason other than drift.
+  const isHindi = article.language === "hi";
+
   return (
     <a
       href={article.url}
@@ -27,8 +31,12 @@ function Card({ article }: { article: Article }) {
         <div className="w-full h-32 bg-[#f5f5f5]" />
       )}
       <div className="p-3 flex flex-col gap-1">
-        <h4 className="text-xs text-[#1f1f1f] leading-snug line-clamp-2">{article.title}</h4>
-        <p className="text-[11px] text-[#6d6d6d]">{formatDate(article.publishedAt)}</p>
+        <h4
+          className={`${isHindi ? "text-lg" : "text-sm"} text-[#1f1f1f] leading-snug line-clamp-2`}
+        >
+          {article.title}
+        </h4>
+        <p className="text-xs text-[#6d6d6d]">{formatDate(article.publishedAt)}</p>
       </div>
     </a>
   );

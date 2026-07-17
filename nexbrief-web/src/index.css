@@ -2,7 +2,8 @@
 
 html {
   /* Bumps every rem-based Tailwind text size up proportionally (~+2px at the base sizes used in this app). */
-  font-size: 112.5%;
+  /* --font-scale is set by useFontScale.ts (A+/A- controls) and multiplies this further. */
+  font-size: calc(112.5% * var(--font-scale, 1));
   font-family: "DM Sans", sans-serif;
 }
 

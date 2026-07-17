@@ -42,6 +42,10 @@ export default function Hero({ articles }: HeroProps) {
   const [main, ...rest] = pickHeroArticles(articles);
   if (!main) return null;
 
+  // Devanagari reads smaller than Latin script at the same pixel size, so
+  // Hindi articles (bhaskar) get a 2-step bump on the Tailwind text scale.
+  const isMainHindi = main.language === "hi";
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-10">
       {/* Large featured story */}
@@ -61,37 +65,48 @@ export default function Hero({ articles }: HeroProps) {
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
         <div className="absolute bottom-0 left-0 right-0 p-6 flex flex-col gap-2">
           <CategoryBadge category={main.category} />
-          <h2 className="text-white text-xl lg:text-2xl leading-snug">{main.title}</h2>
+          <h2
+            className={`text-white leading-snug ${isMainHindi ? "text-3xl lg:text-4xl" : "text-xl lg:text-2xl"}`}
+          >
+            {main.title}
+          </h2>
           <p className="text-gray-300 text-xs">{formatDate(main.publishedAt)}</p>
         </div>
       </a>
 
       {/* Two smaller stories stacked */}
       <div className="grid grid-rows-2 gap-4">
-        {rest.map((a) => (
-          <a
-            key={a.id}
-            href={a.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex gap-4 bg-white hover:bg-[#f5f5f5]/60 transition-colors overflow-hidden p-3"
-          >
-            {a.thumbnailUrl ? (
-              <img
-                src={a.thumbnailUrl}
-                alt={a.title}
-                className="w-32 h-full min-h-[7rem] object-cover flex-shrink-0"
-              />
-            ) : (
-              <div className="w-32 min-h-[7rem] bg-[#f5f5f5] flex-shrink-0" />
-            )}
-            <div className="flex flex-col gap-2 justify-center">
-              <CategoryBadge category={a.category} />
-              <h3 className="text-sm text-[#1f1f1f] leading-snug line-clamp-2">{a.title}</h3>
-              <p className="text-xs text-[#6d6d6d]">{formatDate(a.publishedAt)}</p>
-            </div>
-          </a>
-        ))}
+        {rest.map((a) => {
+          const isHindi = a.language === "hi";
+          return (
+            <a
+              key={a.id}
+              href={a.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex gap-4 bg-white hover:bg-[#f5f5f5]/60 transition-colors overflow-hidden p-3"
+            >
+              {a.thumbnailUrl ? (
+                <img
+                  src={a.thumbnailUrl}
+                  alt={a.title}
+                  className="w-32 h-full min-h-[7rem] object-cover flex-shrink-0"
+                />
+              ) : (
+                <div className="w-32 min-h-[7rem] bg-[#f5f5f5] flex-shrink-0" />
+              )}
+              <div className="flex flex-col gap-2 justify-center">
+                <CategoryBadge category={a.category} />
+                <h3
+                  className={`${isHindi ? "text-lg" : "text-sm"} text-[#1f1f1f] leading-snug line-clamp-2`}
+                >
+                  {a.title}
+                </h3>
+                <p className="text-xs text-[#6d6d6d]">{formatDate(a.publishedAt)}</p>
+              </div>
+            </a>
+          );
+        })}
       </div>
     </div>
   );

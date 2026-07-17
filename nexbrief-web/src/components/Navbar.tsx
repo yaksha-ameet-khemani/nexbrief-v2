@@ -1,3 +1,5 @@
+import { useFontScale } from "../hooks/useFontScale";
+
 const CATEGORY_LABELS: Record<string, string> = {
   "": "All",
   cricket: "Cricket",
@@ -23,6 +25,8 @@ export default function Navbar({
   selectedDate,
   onDateChange,
 }: NavbarProps) {
+  const { increase, decrease, canIncrease, canDecrease } = useFontScale();
+
   return (
     <nav className="bg-[#fffefa] text-[#1f1f1f] px-6 py-4 sticky top-0 z-50 border-b border-[#eaeaea]">
       <div className="max-w-7xl mx-auto flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -36,6 +40,26 @@ export default function Navbar({
           >
             Status
           </a>
+          <div className="flex items-center gap-1 bg-[#f5f5f5] rounded-full px-1 py-1">
+            <button
+              onClick={decrease}
+              disabled={!canDecrease}
+              aria-label="Decrease font size"
+              title="Decrease font size"
+              className="w-7 h-7 flex items-center justify-center rounded-full text-xs font-bold text-[#3d3d3d] hover:bg-[#eaeaea] disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+            >
+              A−
+            </button>
+            <button
+              onClick={increase}
+              disabled={!canIncrease}
+              aria-label="Increase font size"
+              title="Increase font size"
+              className="w-7 h-7 flex items-center justify-center rounded-full text-sm font-bold text-[#3d3d3d] hover:bg-[#eaeaea] disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+            >
+              A+
+            </button>
+          </div>
         </div>
 
         <input
