@@ -27,6 +27,13 @@ export function existingUrlSet(articles: Article[]): Set<string> {
   return new Set(articles.map((a) => a.url));
 }
 
+// Wipes every stored article — summarized and pending alike. Leaves
+// sourceConfig (manual disable toggles) and meta (last-run stats) untouched;
+// meta gets overwritten naturally by the next pipeline run regardless.
+export async function clearArticles(env: Env): Promise<void> {
+  await env.NEXBRIEF_KV.delete(KV_KEY);
+}
+
 export async function loadMeta(env: Env): Promise<PipelineMeta | null> {
   const raw = await env.NEXBRIEF_KV.get(META_KEY);
   if (!raw) return null;

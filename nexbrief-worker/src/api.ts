@@ -1,5 +1,5 @@
 import type { Article, Env, PageResponse } from "./types";
-import { loadArticles, loadMeta, loadSourceConfig, saveSourceConfig } from "./store";
+import { clearArticles, loadArticles, loadMeta, loadSourceConfig, saveSourceConfig } from "./store";
 import { ALL_SOURCES } from "./feeds";
 import { AUTO_PAUSE_PENDING_THRESHOLD } from "./constants";
 
@@ -177,4 +177,13 @@ export async function handlePostToggleSource(request: Request, env: Env): Promis
   await saveSourceConfig(env, updated);
 
   return jsonResponse({ source, enabled, disabledSources: updated.disabledSources });
+}
+
+// Wipes every article (summarized and pending) so the site starts from an
+// empty slate — e.g. to observe pipeline behavior fresh without existing
+// backlog noise. Does not touch source toggles. Gated by X-Refresh-Secret at
+// the call site in index.ts, same as /api/refresh and /api/sources/toggle.
+export async function handlePostClearAll(env: Env): Promise<Response> {
+  await clearArticles(env);
+  return jsonResponse({ cleared: true, totalArticles: 0 });
 }

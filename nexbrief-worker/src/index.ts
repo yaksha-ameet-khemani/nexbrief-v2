@@ -15,6 +15,7 @@ import {
   handleGetArticles,
   handleGetStatus,
   handlePostToggleSource,
+  handlePostClearAll,
   jsonResponse,
   corsPreflight,
   CORS_HEADERS,
@@ -160,6 +161,17 @@ export default {
         return jsonResponse({ error: "Unauthorized" }, 401);
       }
       return handlePostToggleSource(request, env);
+    }
+
+    // Wipes every article in KV (summarized and pending alike) so the site
+    // can be observed from a clean slate. Same admin-secret gate as the
+    // other management routes above.
+    if (url.pathname === "/api/admin/clear-all" && request.method === "POST") {
+      const secret = request.headers.get("X-Refresh-Secret");
+      if (!env.REFRESH_SECRET || secret !== env.REFRESH_SECRET) {
+        return jsonResponse({ error: "Unauthorized" }, 401);
+      }
+      return handlePostClearAll(env);
     }
 
     return new Response("Not found", { status: 404, headers: CORS_HEADERS });

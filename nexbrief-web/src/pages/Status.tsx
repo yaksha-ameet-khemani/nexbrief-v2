@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { fetchStatus, toggleSource } from "../api/articleApi";
+import { fetchStatus, toggleSource, clearAllArticles } from "../api/articleApi";
 import type { StatusResponse } from "../types/Status";
 import { SOURCE_LABELS } from "../types/Article";
 
@@ -58,6 +58,8 @@ export default function Status() {
   const [secretInput, setSecretInput] = useState("");
   const [togglingSource, setTogglingSource] = useState<string | null>(null);
   const [toggleError, setToggleError] = useState("");
+  const [clearing, setClearing] = useState(false);
+  const [clearError, setClearError] = useState("");
 
   const load = useCallback(async () => {
     if (loadingRef.current) return; // avoid overlapping fetches if one is slow
@@ -118,6 +120,29 @@ export default function Status() {
       }
     } finally {
       setTogglingSource(null);
+    }
+  }
+
+  async function handleClearAll() {
+    const confirmed = window.confirm(
+      "This deletes every article — summarized and pending alike. The site will show nothing until the next pipeline run repopulates it. This cannot be undone. Continue?",
+    );
+    if (!confirmed) return;
+
+    setClearing(true);
+    setClearError("");
+    try {
+      await clearAllArticles(adminSecret);
+      await load();
+    } catch (err: any) {
+      if (err?.response?.status === 401) {
+        setClearError("That secret was rejected — re-enter it below.");
+        lockAdmin();
+      } else {
+        setClearError("Failed to clear articles. Please try again.");
+      }
+    } finally {
+      setClearing(false);
     }
   }
 
@@ -371,6 +396,26 @@ export default function Status() {
                 </table>
               </div>
             </div>
+
+            {adminSecret && (
+              <div className="bg-white rounded-xl shadow-sm border border-red-100 p-5 flex flex-col gap-3">
+                <h2 className="text-sm font-bold text-red-700">Danger zone</h2>
+                {clearError && <p className="text-xs text-red-500">{clearError}</p>}
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <p className="text-xs text-gray-400 max-w-md">
+                    Deletes every article in storage — summarized and pending. The site goes
+                    empty until the next pipeline run repopulates it. Cannot be undone.
+                  </p>
+                  <button
+                    onClick={handleClearAll}
+                    disabled={clearing}
+                    className="text-xs px-3 py-1.5 rounded-full bg-red-50 text-red-700 hover:bg-red-100 transition-colors disabled:opacity-50 shrink-0"
+                  >
+                    {clearing ? "Clearing…" : "Clear all articles"}
+                  </button>
+                </div>
+              </div>
+            )}
 
             <p className="text-xs text-gray-400 text-center">
               Server time: {formatDateTime(status.serverTime)}

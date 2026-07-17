@@ -46,3 +46,14 @@ export const toggleSource = async (
   );
   return response.data;
 };
+
+// Admin-only: wipes every article (summarized and pending). Same secret as
+// toggleSource/manual refresh.
+export const clearAllArticles = async (secret: string): Promise<{ cleared: boolean }> => {
+  const response = await api.post<{ cleared: boolean }>(
+    "/admin/clear-all",
+    {},
+    { headers: { "X-Refresh-Secret": secret } },
+  );
+  return response.data;
+};
