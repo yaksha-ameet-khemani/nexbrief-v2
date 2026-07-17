@@ -11,6 +11,9 @@ export interface Article {
   publishedAt: string; // ISO 8601
   rawContent: string | null;
   summary: string | null;
+  // Which lane produced `summary` — null while pending, or if it was never
+  // set (legacy articles from before this field existed).
+  summarizedBy: "groq" | "cloudflare" | null;
   searchQuery: string | null;
   links: Record<string, string> | null;
   createdAt: string; // ISO 8601
@@ -19,7 +22,7 @@ export interface Article {
 // Shape produced by the RSS-fetch phase, before scraping/summarizing has happened.
 export type FetchedArticle = Omit<
   Article,
-  "id" | "rawContent" | "summary" | "searchQuery" | "links" | "createdAt"
+  "id" | "rawContent" | "summary" | "summarizedBy" | "searchQuery" | "links" | "createdAt"
 >;
 
 export interface PageResponse<T> {
@@ -45,6 +48,10 @@ export interface PipelineMeta {
   lastRunNewArticles: number;
   lastRunBacklogCleared: number;
   lastRunRateLimited: boolean;
+  // Combined across backlog (Phase 0) and new-article (Phase 2+3)
+  // summarization this run, split by which lane produced each summary.
+  lastRunSummarizedByGroq: number;
+  lastRunSummarizedByCloudflare: number;
   groqRateLimit: GroqRateLimitInfo | null;
 }
 

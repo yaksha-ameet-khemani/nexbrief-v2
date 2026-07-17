@@ -1,7 +1,6 @@
 import { XMLParser } from "fast-xml-parser";
 import type { FetchedArticle } from "./types";
-
-const MAX_ARTICLES_PER_SOURCE = 5;
+import { MAX_ARTICLES_PER_SOURCE } from "./constants";
 
 // Ported from RssFetcherService.RSS_FEEDS (NexBrief Spring Boot backend).
 export const RSS_FEEDS: Record<
@@ -106,6 +105,7 @@ async function fetchFeed(
   feedUrl: string,
   meta: { source: string; category: string; language: string },
   existingUrls: Set<string>,
+  limit: number,
 ): Promise<FetchedArticle[]> {
   const res = await fetch(feedUrl, {
     headers: { "User-Agent": "Mozilla/5.0 (compatible; NexBriefBot/1.0)" },
@@ -123,7 +123,7 @@ async function fetchFeed(
   const results: FetchedArticle[] = [];
 
   for (const item of items) {
-    if (results.length >= MAX_ARTICLES_PER_SOURCE) break;
+    if (results.length >= limit) break;
 
     const url = extractUrl(item);
     if (!url || existingUrls.has(url)) continue;
@@ -154,6 +154,12 @@ export const ALL_SOURCES: string[] = [...new Set(Object.values(RSS_FEEDS).map((m
 export async function fetchAllFeeds(
   existingUrls: Set<string>,
   disabledSources: Set<string> = new Set(),
+  // Per-source fetch budget for this run, computed by the caller as
+  // MAX_ARTICLES_PER_SOURCE minus however many articles that source already
+  // has pending — a source not present here fetches at the full cap. Lets a
+  // source with a growing backlog pull in fewer new articles instead of
+  // piling on top of one it hasn't cleared yet, without a hard on/off switch.
+  fetchLimits: Map<string, number> = new Map(),
 ): Promise<FetchedArticle[]> {
   const all: FetchedArticle[] = [];
 
@@ -162,10 +168,15 @@ export async function fetchAllFeeds(
       console.log(`Phase 1 | Source: ${meta.source} | Skipped (disabled)`);
       continue;
     }
+    const limit = fetchLimits.get(meta.source) ?? MAX_ARTICLES_PER_SOURCE;
+    if (limit <= 0) {
+      console.log(`Phase 1 | Source: ${meta.source} | Skipped (throttled — pending backlog already at cap)`);
+      continue;
+    }
     try {
-      const articles = await fetchFeed(feedUrl, meta, existingUrls);
+      const articles = await fetchFeed(feedUrl, meta, existingUrls, limit);
       all.push(...articles);
-      console.log(`Phase 1 | Source: ${meta.source} | Found ${articles.length} new articles`);
+      console.log(`Phase 1 | Source: ${meta.source} | Found ${articles.length} new articles (limit ${limit})`);
     } catch (err) {
       console.error(`Failed to fetch feed: ${meta.source} | Error: ${(err as Error).message}`);
     }

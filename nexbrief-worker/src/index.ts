@@ -21,7 +21,8 @@ import {
   CORS_HEADERS,
 } from "./api";
 import { translateToEnglish } from "./translate";
-import { AUTO_PAUSE_PENDING_THRESHOLD } from "./constants";
+import { summarizeWithCloudflare } from "./cfSummarize";
+import { MAX_ARTICLES_PER_SOURCE } from "./constants";
 
 // Sources whose articles are translated to English (via Cloudflare Workers
 // AI) before anything else happens to them — title, description, and raw
@@ -61,6 +62,42 @@ function interleaveBySource<T extends { source: string }>(items: T[]): T[] {
     }
   }
   return result;
+}
+
+interface SummarizeResult {
+  summary: string | null;
+  summarizedBy: "groq" | "cloudflare" | null;
+}
+
+// Tries Groq first (better quality, what the site used exclusively before).
+// If Groq's rate limit has already been hit earlier in this run, or gets hit
+// on this call, falls back to Cloudflare Workers AI — a separate free quota
+// from Groq entirely (see cfSummarize.ts) — instead of leaving the article
+// pending until the next hourly run. `groqState` is shared across the whole
+// run (backlog + new articles) so once Groq 429s once, every later article
+// skips straight to Cloudflare rather than wasting a call re-discovering the
+// same rate limit.
+async function summarizeWithFallback(
+  env: Env,
+  content: string,
+  language: string,
+  groqState: { rateLimited: boolean },
+): Promise<SummarizeResult> {
+  if (!groqState.rateLimited) {
+    try {
+      const summary = await summarize(env, content, language);
+      if (summary) return { summary, summarizedBy: "groq" };
+    } catch (err) {
+      if (err instanceof RateLimitError) {
+        groqState.rateLimited = true;
+      } else {
+        console.error(`Summarize: Groq error | ${(err as Error).message}`);
+      }
+    }
+  }
+
+  const cfSummary = await summarizeWithCloudflare(env, content, language);
+  return { summary: cfSummary, summarizedBy: cfSummary ? "cloudflare" : null };
 }
 
 // One-time-per-article migration for TRANSLATE_SOURCES: translates title,
@@ -204,43 +241,48 @@ async function runPipeline(env: Env): Promise<void> {
   const backlogResult = await processBacklog(env, articles, disabledSources);
   articles = backlogResult.articles;
   if (backlogResult.rateLimited) {
-    console.warn("Phase 0: Rate limit hit during backlog processing. Continuing to Phase 1 anyway so new articles still get discovered (they'll just stay pending until a later run).");
+    console.warn("Phase 0: Groq rate limit hit during backlog processing; remaining backlog was routed through Cloudflare Workers AI where possible.");
   } else {
     console.log("Phase 0: Backlog phase complete.");
   }
 
-  // Auto-pause fetching (not backlog-clearing) for any non-disabled source
-  // whose pending backlog is already over the threshold — computed after
-  // Phase 0 so a source that just got cleared below the line resumes
-  // fetching again this same run.
+  // Each source's fetch budget for this run shrinks by however many
+  // articles it already has waiting on a summary — a source with 2 pending
+  // only pulls 3 new ones, a source at or past the full per-run cap pulls
+  // zero. Recomputed after Phase 0 so a source that just got cleared back
+  // down gets its budget back immediately, same run. Prevents any single
+  // source's backlog from snowballing into "a mountain" while quiet sources
+  // keep fetching at full pace, instead of the old hard on/off cutoff.
   const pendingCounts = new Map<string, number>();
   for (const a of articles) {
     if (a.summary == null) pendingCounts.set(a.source, (pendingCounts.get(a.source) ?? 0) + 1);
   }
-  const autoPausedSources = new Set(
-    [...pendingCounts.entries()]
-      .filter(([source, count]) => count > AUTO_PAUSE_PENDING_THRESHOLD && !disabledSources.has(source))
-      .map(([source]) => source),
+  const fetchLimits = new Map<string, number>();
+  for (const [source, count] of pendingCounts.entries()) {
+    fetchLimits.set(source, Math.max(0, MAX_ARTICLES_PER_SOURCE - count));
+  }
+  const throttled = [...fetchLimits.entries()].filter(
+    ([source, limit]) => limit < MAX_ARTICLES_PER_SOURCE && !disabledSources.has(source),
   );
-  if (autoPausedSources.size > 0) {
+  if (throttled.length > 0) {
     console.log(
-      `Pipeline: Auto-pausing fetch for sources over the ${AUTO_PAUSE_PENDING_THRESHOLD}-pending threshold: ${[...autoPausedSources].join(", ")}`,
+      `Pipeline: Throttling fetch this run: ${throttled.map(([s, l]) => `${s}=${l}`).join(", ")}`,
     );
   }
-  const fetchSkipSources = new Set([...disabledSources, ...autoPausedSources]);
 
   console.log("Phase 1: Fetching RSS...");
   const existingUrls = existingUrlSet(articles);
-  const newRaw = interleaveBySource(await fetchAllFeeds(existingUrls, fetchSkipSources));
+  const newRaw = interleaveBySource(await fetchAllFeeds(existingUrls, disabledSources, fetchLimits));
   console.log(`Phase 1: Completed. ${newRaw.length} new articles found.`);
 
   console.log("Phase 2 + 3: Extracting content and summarizing new articles...");
   const newArticles: Article[] = [];
-  // If Phase 0 already hit the rate limit, don't bother spending Groq calls
-  // in this loop either — they'd just 429 again. Still scrape and save every
-  // new article below so discovery (which costs no Groq quota) never stalls
-  // just because summarization is temporarily out of quota.
-  let rateLimitedDuringNew = backlogResult.rateLimited;
+  // Carries Phase 0's rate-limit state into this loop — if Groq already
+  // 429'd during backlog processing, skip straight to the Cloudflare lane
+  // instead of wasting a call re-discovering the same rate limit.
+  const groqState = { rateLimited: backlogResult.rateLimited };
+  let newByGroq = 0;
+  let newByCloudflare = 0;
 
   for (const raw of newRaw) {
     const scraped = await scrapeArticle(raw.url, raw.source);
@@ -286,22 +328,19 @@ async function runPipeline(env: Env): Promise<void> {
     }
 
     let summary: string | null = null;
+    let summarizedBy: "groq" | "cloudflare" | null = null;
     let searchQuery: string | null = null;
     let links: Record<string, string> | null = null;
 
-    if (content && !rateLimitedDuringNew) {
-      try {
-        summary = await summarize(env, content, language);
-      } catch (err) {
-        if (err instanceof RateLimitError) {
-          rateLimitedDuringNew = true;
-        } else {
-          console.error(`Phase 3: Error | source=${raw.source} | title=${raw.title} | ${(err as Error).message}`);
-        }
-      }
+    if (content) {
+      const result = await summarizeWithFallback(env, content, language, groqState);
+      summary = result.summary;
+      summarizedBy = result.summarizedBy;
+      if (summarizedBy === "groq") newByGroq++;
+      else if (summarizedBy === "cloudflare") newByCloudflare++;
 
       if (summary) {
-        await sleep(RATE_LIMIT_PACING_MS); // pace the two Groq calls apart
+        await sleep(RATE_LIMIT_PACING_MS); // pace before the (always-Groq) search-query call
         const query = await extractSearchQuery(env, title, summary).catch((err) => {
           if (!(err instanceof RateLimitError)) {
             console.error(`SearchLink: Error | title=${title} | ${(err as Error).message}`);
@@ -323,6 +362,7 @@ async function runPipeline(env: Env): Promise<void> {
       language,
       rawContent: content,
       summary,
+      summarizedBy,
       searchQuery,
       links,
       createdAt: new Date().toISOString(),
@@ -334,8 +374,8 @@ async function runPipeline(env: Env): Promise<void> {
     await saveArticles(env, [...articles, ...newArticles]);
   }
 
-  if (rateLimitedDuringNew) {
-    console.warn("Phase 2+3: Rate limit hit (429). New articles were still fetched and saved as pending for a later run to summarize.");
+  if (groqState.rateLimited) {
+    console.warn("Phase 2+3: Groq rate limit hit (429) this run. Remaining summaries were routed through Cloudflare Workers AI where possible; any that still came up empty stay pending for a later run.");
   }
 
   const merged = [...articles, ...newArticles];
@@ -343,7 +383,9 @@ async function runPipeline(env: Env): Promise<void> {
     lastRunAt: new Date().toISOString(),
     lastRunNewArticles: newRaw.length,
     lastRunBacklogCleared: backlogResult.cleared,
-    lastRunRateLimited: rateLimitedDuringNew,
+    lastRunRateLimited: groqState.rateLimited,
+    lastRunSummarizedByGroq: backlogResult.clearedByGroq + newByGroq,
+    lastRunSummarizedByCloudflare: backlogResult.clearedByCloudflare + newByCloudflare,
     groqRateLimit: getLastRateLimitInfo(),
   });
   console.log(
@@ -355,26 +397,46 @@ async function processBacklog(
   env: Env,
   articles: Article[],
   disabledSources: Set<string>,
-): Promise<{ articles: Article[]; rateLimited: boolean; cleared: number }> {
+): Promise<{
+  articles: Article[];
+  rateLimited: boolean;
+  cleared: number;
+  clearedByGroq: number;
+  clearedByCloudflare: number;
+}> {
   const pending = articles.filter(
     (a) => a.rawContent && a.summary == null && !disabledSources.has(a.source),
   );
   if (pending.length === 0) {
     console.log("Phase 0: No backlog articles found.");
-    return { articles, rateLimited: false, cleared: 0 };
+    return { articles, rateLimited: false, cleared: 0, clearedByGroq: 0, clearedByCloudflare: 0 };
   }
 
   const backlog = interleaveBySource(pending).slice(0, BACKLOG_LIMIT);
   console.log(`Phase 0: ${pending.length} articles pending summary. Processing up to ${backlog.length} as backlog.`);
 
+  // Shared across the whole backlog loop, same reasoning as Phase 2+3: once
+  // Groq 429s once, stop retrying it and route the rest of this run's
+  // backlog through Cloudflare instead of halting entirely — a rate-limited
+  // run used to stop backlog-clearing outright, which is exactly how a
+  // handful of sources accumulated hundreds of pending articles before.
+  const groqState = { rateLimited: false };
   let cleared = 0;
+  let clearedByGroq = 0;
+  let clearedByCloudflare = 0;
 
   for (const article of backlog) {
     try {
-      const summary = await summarize(env, article.rawContent!, article.language);
+      const { summary, summarizedBy } = await summarizeWithFallback(
+        env,
+        article.rawContent!,
+        article.language,
+        groqState,
+      );
       if (summary) {
         article.summary = summary;
-        await sleep(RATE_LIMIT_PACING_MS); // pace the two Groq calls apart
+        article.summarizedBy = summarizedBy;
+        await sleep(RATE_LIMIT_PACING_MS); // pace before the (always-Groq) search-query call
         const query = await extractSearchQuery(env, article.title, summary).catch((err) => {
           if (!(err instanceof RateLimitError)) {
             console.error(`Phase 0 SearchLink: Error | title=${article.title} | ${(err as Error).message}`);
@@ -385,7 +447,9 @@ async function processBacklog(
         article.links = buildLinks(query ?? article.title, article.category);
 
         cleared++;
-        console.log(`Phase 0: Backlog summarized | source=${article.source} | title=${article.title}`);
+        if (summarizedBy === "groq") clearedByGroq++;
+        else if (summarizedBy === "cloudflare") clearedByCloudflare++;
+        console.log(`Phase 0: Backlog summarized | source=${article.source} | via=${summarizedBy} | title=${article.title}`);
 
         // Save immediately, per article. Cloudflare can (and did, in
         // testing) kill a waitUntil-extended background task before it
@@ -398,13 +462,9 @@ async function processBacklog(
 
       await sleep(RATE_LIMIT_PACING_MS); // pace before the next article's Groq calls
     } catch (err) {
-      if (err instanceof RateLimitError) {
-        console.warn(`Phase 0: Rate limit hit (429). Halting pipeline — ${pending.length} articles still pending.`);
-        return { articles, rateLimited: true, cleared };
-      }
       console.error(`Phase 0: Error | source=${article.source} | title=${article.title} | ${(err as Error).message}`);
     }
   }
 
-  return { articles, rateLimited: false, cleared };
+  return { articles, rateLimited: groqState.rateLimited, cleared, clearedByGroq, clearedByCloudflare };
 }

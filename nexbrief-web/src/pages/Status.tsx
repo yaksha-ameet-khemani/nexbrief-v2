@@ -218,6 +218,14 @@ export default function Status() {
                   <span className="text-gray-400">Backlog cleared last run: </span>
                   <span className="text-gray-700">{status.lastRunBacklogCleared ?? "—"}</span>
                 </div>
+                <div>
+                  <span className="text-gray-400">Summarized via Groq last run: </span>
+                  <span className="text-gray-700">{status.lastRunSummarizedByGroq ?? "—"}</span>
+                </div>
+                <div>
+                  <span className="text-gray-400">Summarized via Cloudflare last run: </span>
+                  <span className="text-gray-700">{status.lastRunSummarizedByCloudflare ?? "—"}</span>
+                </div>
               </div>
               <p className="text-xs text-gray-400">
                 Times shown in your local timezone — the pipeline runs on the hour in UTC, which
@@ -326,9 +334,10 @@ export default function Status() {
                 <p className="text-xs text-red-500 mb-3">{toggleError}</p>
               )}
               <p className="text-xs text-gray-400 -mt-1 mb-3">
-                A source auto-pauses new fetching (but keeps clearing its existing backlog)
-                once its pending count goes over {status.autoPauseThreshold} — it resumes on its
-                own once that drops back down.
+                Each source's new-article fetch budget shrinks by its own pending count each run
+                (backlog-clearing is unaffected) — a source shows "Auto-paused" once pending
+                reaches {status.autoPauseThreshold} and its fetch budget hits zero, resuming on
+                its own as that count drops.
               </p>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm text-left">
@@ -337,6 +346,8 @@ export default function Status() {
                       <th className="py-2 pr-4 font-medium">Source</th>
                       <th className="py-2 pr-4 font-medium">Total</th>
                       <th className="py-2 pr-4 font-medium">Summarized</th>
+                      <th className="py-2 pr-4 font-medium">Via Groq</th>
+                      <th className="py-2 pr-4 font-medium">Via Cloudflare</th>
                       <th className="py-2 pr-4 font-medium">Pending</th>
                       <th className="py-2 pr-4 font-medium">% Pending</th>
                       {adminSecret && <th className="py-2 pr-4 font-medium">Control</th>}
@@ -366,6 +377,8 @@ export default function Status() {
                           </td>
                           <td className="py-2 pr-4 text-gray-700">{stats.total}</td>
                           <td className="py-2 pr-4 text-green-600">{stats.summarized}</td>
+                          <td className="py-2 pr-4 text-gray-700">{stats.groqSummarized}</td>
+                          <td className="py-2 pr-4 text-gray-700">{stats.cloudflareSummarized}</td>
                           <td className="py-2 pr-4 text-amber-600">{stats.pending}</td>
                           <td className="py-2 pr-4 text-amber-600">
                             {percentPending(stats.total, stats.pending)}

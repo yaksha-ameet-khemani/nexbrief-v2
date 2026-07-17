@@ -12,6 +12,8 @@ export interface SourceStats {
   total: number;
   summarized: number;
   pending: number;
+  groqSummarized: number;
+  cloudflareSummarized: number;
 }
 
 export interface PendingArticleSummary {
@@ -27,12 +29,16 @@ export interface StatusResponse {
   totalArticles: number;
   summarized: number;
   pending: number;
+  summarizedByGroq: number;
+  summarizedByCloudflare: number;
   bySource: Record<string, SourceStats>;
   pendingArticles: PendingArticleSummary[];
   lastRunAt: string | null;
   lastRunNewArticles: number | null;
   lastRunBacklogCleared: number | null;
   lastRunRateLimited: boolean | null;
+  lastRunSummarizedByGroq: number | null;
+  lastRunSummarizedByCloudflare: number | null;
   groqRateLimit: GroqRateLimitInfo | null;
   disabledSources: string[];
   autoPausedSources: string[];

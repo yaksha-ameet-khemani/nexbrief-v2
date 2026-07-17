@@ -1,7 +1,7 @@
 import type { Article, Env, PageResponse } from "./types";
 import { clearArticles, loadArticles, loadMeta, loadSourceConfig, saveSourceConfig } from "./store";
 import { ALL_SOURCES } from "./feeds";
-import { AUTO_PAUSE_PENDING_THRESHOLD } from "./constants";
+import { MAX_ARTICLES_PER_SOURCE } from "./constants";
 
 export const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -74,6 +74,8 @@ interface SourceStats {
   total: number;
   summarized: number;
   pending: number;
+  groqSummarized: number;
+  cloudflareSummarized: number;
 }
 
 interface PendingArticleSummary {
@@ -96,20 +98,31 @@ export async function handleGetStatus(env: Env): Promise<Response> {
 
   const summarized = articles.filter((a) => a.summary != null).length;
   const pending = articles.length - summarized;
+  const summarizedByGroq = articles.filter((a) => a.summarizedBy === "groq").length;
+  const summarizedByCloudflare = articles.filter((a) => a.summarizedBy === "cloudflare").length;
 
   // Seeded from every known source (not just ones with cached articles) so a
   // just-disabled or newly-empty source still shows up in the management
   // table with a 0 row, rather than disappearing once its articles roll off
   // the retention window.
+  const emptyStats = (): SourceStats => ({
+    total: 0,
+    summarized: 0,
+    pending: 0,
+    groqSummarized: 0,
+    cloudflareSummarized: 0,
+  });
   const bySource: Record<string, SourceStats> = {};
   for (const source of ALL_SOURCES) {
-    bySource[source] = { total: 0, summarized: 0, pending: 0 };
+    bySource[source] = emptyStats();
   }
   for (const a of articles) {
-    const stats = (bySource[a.source] ??= { total: 0, summarized: 0, pending: 0 });
+    const stats = (bySource[a.source] ??= emptyStats());
     stats.total++;
     if (a.summary != null) stats.summarized++;
     else stats.pending++;
+    if (a.summarizedBy === "groq") stats.groqSummarized++;
+    else if (a.summarizedBy === "cloudflare") stats.cloudflareSummarized++;
   }
 
   const pendingArticles: PendingArticleSummary[] = articles
@@ -128,21 +141,27 @@ export async function handleGetStatus(env: Env): Promise<Response> {
     totalArticles: articles.length,
     summarized,
     pending,
+    summarizedByGroq,
+    summarizedByCloudflare,
     bySource,
     pendingArticles,
     lastRunAt: meta?.lastRunAt ?? null,
     lastRunNewArticles: meta?.lastRunNewArticles ?? null,
     lastRunBacklogCleared: meta?.lastRunBacklogCleared ?? null,
     lastRunRateLimited: meta?.lastRunRateLimited ?? null,
+    lastRunSummarizedByGroq: meta?.lastRunSummarizedByGroq ?? null,
+    lastRunSummarizedByCloudflare: meta?.lastRunSummarizedByCloudflare ?? null,
     groqRateLimit: meta?.groqRateLimit ?? null,
     disabledSources: sourceConfig.disabledSources,
-    // Mirrors the pipeline's own auto-pause check (index.ts) so the status
-    // page can show it — a source shows up here once its pending backlog
-    // exceeds the threshold, whether or not it's also manually disabled.
+    // Mirrors the pipeline's own fetch-throttle math (index.ts) so the
+    // status page can show it — a source shows up here once its pending
+    // backlog is at or past the per-run fetch cap (i.e. this run's fetch
+    // budget for it is exactly zero), whether or not it's also manually
+    // disabled.
     autoPausedSources: Object.entries(bySource)
-      .filter(([, stats]) => stats.pending > AUTO_PAUSE_PENDING_THRESHOLD)
+      .filter(([, stats]) => stats.pending >= MAX_ARTICLES_PER_SOURCE)
       .map(([source]) => source),
-    autoPauseThreshold: AUTO_PAUSE_PENDING_THRESHOLD,
+    autoPauseThreshold: MAX_ARTICLES_PER_SOURCE,
   });
 }
 
