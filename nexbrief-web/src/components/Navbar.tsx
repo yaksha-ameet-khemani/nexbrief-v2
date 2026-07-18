@@ -1,11 +1,6 @@
 import { useFontScale } from "../hooks/useFontScale";
 import { SOURCE_LABELS } from "../types/Article";
 
-const SOURCE_NAV_LABELS: Record<string, string> = {
-  "": "All",
-  ...SOURCE_LABELS,
-};
-
 interface NavbarProps {
   keyword: string;
   onKeywordChange: (val: string) => void;
@@ -26,7 +21,7 @@ export default function Navbar({
   const { increase, decrease, canIncrease, canDecrease } = useFontScale();
 
   return (
-    <nav className="bg-[#fffefa] text-[#1f1f1f] sticky top-0 z-50 border-b border-[#eaeaea]">
+    <nav className="bg-[#fffefa] text-[#1f1f1f] sticky top-0 z-50 border-b border-[#6d6d6d]">
       <div className="max-w-7xl mx-auto px-6 py-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl tracking-tight text-[#1f1f1f]">
@@ -77,9 +72,9 @@ export default function Navbar({
         />
       </div>
 
-      <div className="border-t border-[#eaeaea]">
+      <div className="border-t border-[#6d6d6d]">
         <div className="max-w-7xl mx-auto px-6 py-3 flex gap-2 flex-wrap md:justify-center">
-          {Object.entries(SOURCE_NAV_LABELS).map(([val, label]) => (
+          {Object.entries(SOURCE_LABELS).map(([val, label]) => (
             <button
               key={val}
               onClick={() => onSourceChange(val)}

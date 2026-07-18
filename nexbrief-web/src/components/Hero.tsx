@@ -53,7 +53,7 @@ export default function Hero({ articles }: HeroProps) {
         href={main.url}
         target="_blank"
         rel="noopener noreferrer"
-        className="relative overflow-hidden bg-[#1f1f1f] group h-72 lg:h-full min-h-[22rem] block"
+        className="relative overflow-hidden bg-[#1f1f1f] group h-80 lg:h-full min-h-[28rem] block"
       >
         {main.thumbnailUrl && (
           <img
@@ -84,21 +84,21 @@ export default function Hero({ articles }: HeroProps) {
               href={a.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex gap-4 bg-white hover:bg-[#f5f5f5]/60 transition-colors overflow-hidden p-3"
+              className="flex gap-4 bg-white hover:bg-[#f5f5f5]/60 transition-colors overflow-hidden p-4"
             >
               {a.thumbnailUrl ? (
                 <img
                   src={a.thumbnailUrl}
                   alt={a.title}
-                  className="w-32 h-full min-h-[7rem] object-cover flex-shrink-0"
+                  className="w-44 h-full min-h-[9rem] object-cover flex-shrink-0"
                 />
               ) : (
-                <div className="w-32 min-h-[7rem] bg-[#f5f5f5] flex-shrink-0" />
+                <div className="w-44 min-h-[9rem] bg-[#f5f5f5] flex-shrink-0" />
               )}
               <div className="flex flex-col gap-2 justify-center">
                 <CategoryBadge category={a.category} />
                 <h3
-                  className={`${isHindi ? "text-lg" : "text-sm"} text-[#1f1f1f] leading-snug line-clamp-2`}
+                  className={`${isHindi ? "text-xl" : "text-base"} text-[#1f1f1f] leading-snug line-clamp-2`}
                 >
                   {a.title}
                 </h3>

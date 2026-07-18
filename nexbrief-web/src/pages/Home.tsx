@@ -43,9 +43,6 @@ export default function Home() {
   const isBrowsing = !keyword && !selectedSource;
   const heroIds = new Set(isBrowsing ? pickHeroArticles(articles).map((a) => a.id) : []);
   const remaining = articles.filter((a) => !heroIds.has(a.id));
-  const feedArticles = [...remaining].sort(
-    (a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime(),
-  );
 
   return (
     <div className="min-h-screen bg-[#fffefa]">
@@ -80,11 +77,6 @@ export default function Home() {
             <>
               <Hero articles={articles} />
               <NewsCarousel articles={remaining} />
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {feedArticles.map((a) => (
-                  <ArticleCard key={a.id} article={a} />
-                ))}
-              </div>
             </>
           ))}
       </main>
