@@ -16,6 +16,23 @@ const LANGUAGE_NAMES: Record<string, string> = {
   en: "English",
 };
 
+// Unicode script ranges for each source language we translate from. Used to
+// catch a "translation" that's actually just the original text echoed back
+// unchanged (or only partially translated) — both Groq and Cloudflare have
+// been observed doing this occasionally, and since the caller only checked
+// "did I get a non-empty string back," a silent no-op translation used to
+// get treated as success and permanently marked `language: "en"` with the
+// native text still showing.
+const SCRIPT_RANGES: Record<string, RegExp> = {
+  ur: /[؀-ۿ]/, // Arabic script, used for Urdu
+  hi: /[ऀ-ॿ]/, // Devanagari, used for Hindi
+};
+
+export function looksTranslated(text: string, language: string): boolean {
+  const scriptPattern = SCRIPT_RANGES[language];
+  return !scriptPattern || !scriptPattern.test(text);
+}
+
 function buildPrompt(sourceLang: string): string {
   return (
     `Translate the following ${sourceLang} text to English. Preserve names of people, places, ` +
@@ -62,7 +79,10 @@ export async function translateWithFallback(
   if (!groqState.rateLimited) {
     try {
       const translated = await translateGroq(env, text, sourceLang);
-      if (translated) return translated;
+      if (translated) {
+        if (looksTranslated(translated, language)) return translated;
+        console.warn(`Translate: Groq returned untranslated/mixed-script text, falling back | language=${language}`);
+      }
     } catch (err) {
       if (err instanceof RateLimitError) {
         groqState.rateLimited = true;
@@ -72,5 +92,10 @@ export async function translateWithFallback(
     }
   }
 
-  return translateWithCloudflare(env, text, sourceLang);
+  const cfTranslated = await translateWithCloudflare(env, text, sourceLang);
+  if (cfTranslated && !looksTranslated(cfTranslated, language)) {
+    console.warn(`Translate: Cloudflare returned untranslated/mixed-script text | language=${language}`);
+    return null;
+  }
+  return cfTranslated;
 }

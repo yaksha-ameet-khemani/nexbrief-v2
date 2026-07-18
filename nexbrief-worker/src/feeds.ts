@@ -151,6 +151,16 @@ async function fetchFeed(
 // source-management table even for a source with zero cached articles.
 export const ALL_SOURCES: string[] = [...new Set(Object.values(RSS_FEEDS).map((m) => m.source))];
 
+// Each source's original RSS language, derived from RSS_FEEDS the same way
+// as ALL_SOURCES. Used to recover a source's original language when an
+// article's `language` field has already been overwritten to "en" by the
+// TRANSLATE_SOURCES pipeline (see index.ts's normalizeTranslatedSources) but
+// needs to be reset for retry — e.g. a translation that silently failed but
+// still got treated as a success.
+export const SOURCE_LANGUAGES: Record<string, string> = Object.fromEntries(
+  Object.values(RSS_FEEDS).map((m) => [m.source, m.language]),
+);
+
 export async function fetchAllFeeds(
   existingUrls: Set<string>,
   disabledSources: Set<string> = new Set(),

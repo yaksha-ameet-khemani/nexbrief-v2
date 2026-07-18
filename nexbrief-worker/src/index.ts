@@ -1,5 +1,5 @@
 import type { Article, Env } from "./types";
-import { fetchAllFeeds } from "./feeds";
+import { fetchAllFeeds, SOURCE_LANGUAGES } from "./feeds";
 import { scrapeArticle, EXTRACTION_FAILED } from "./scrape";
 import {
   summarize,
@@ -20,7 +20,7 @@ import {
   corsPreflight,
   CORS_HEADERS,
 } from "./api";
-import { translateWithFallback } from "./translate";
+import { translateWithFallback, looksTranslated } from "./translate";
 import { summarizeWithCloudflare } from "./cfSummarize";
 import { MAX_ARTICLES_PER_SOURCE } from "./constants";
 
@@ -98,6 +98,80 @@ async function summarizeWithFallback(
 
   const cfSummary = await summarizeWithCloudflare(env, content, language);
   return { summary: cfSummary, summarizedBy: cfSummary ? "cloudflare" : null };
+}
+
+// Repairs a real bug found in production: a translation call could silently
+// return the original native-script text unchanged (or only partially
+// translate), and since normalizeTranslatedSources only checked "did I get a
+// non-empty string back," that got treated as a success — permanently
+// flipping `language` to "en" with native-script text still showing, which
+// then made the article invisible to normalizeTranslatedSources on every
+// later run (it only looks at articles NOT already marked "en"). Scans every
+// already-"en" TRANSLATE_SOURCES article for fields that still contain their
+// source script and retries just those fields, using SOURCE_LANGUAGES (see
+// feeds.ts) to recover the original language since it's no longer stored on
+// the article once overwritten to "en".
+async function repairStuckTranslations(
+  env: Env,
+  articles: Article[],
+): Promise<{ articles: Article[]; repaired: number }> {
+  let repaired = 0;
+  const groqState = { rateLimited: false };
+
+  for (const article of articles) {
+    if (!TRANSLATE_SOURCES.has(article.source) || article.language !== "en") continue;
+    const originalLanguage = SOURCE_LANGUAGES[article.source];
+    if (!originalLanguage) continue;
+
+    let fixedAny = false;
+
+    if (!looksTranslated(article.title, originalLanguage)) {
+      const retried = await translateWithFallback(env, article.title, originalLanguage, groqState);
+      if (retried && looksTranslated(retried, originalLanguage)) {
+        article.title = retried;
+        fixedAny = true;
+      }
+    }
+    if (article.description && !looksTranslated(article.description, originalLanguage)) {
+      const retried = await translateWithFallback(env, article.description, originalLanguage, groqState);
+      if (retried && looksTranslated(retried, originalLanguage)) {
+        article.description = retried;
+        fixedAny = true;
+      }
+    }
+    if (article.rawContent && !looksTranslated(article.rawContent, originalLanguage)) {
+      const retried = await translateWithFallback(
+        env,
+        article.rawContent.slice(0, TRANSLATE_CONTENT_MAX_CHARS),
+        originalLanguage,
+        groqState,
+      );
+      if (retried && looksTranslated(retried, originalLanguage)) {
+        article.rawContent = retried;
+        fixedAny = true;
+      }
+    }
+    if (article.summary && !looksTranslated(article.summary, originalLanguage)) {
+      const retried = await translateWithFallback(env, article.summary, originalLanguage, groqState);
+      if (retried && looksTranslated(retried, originalLanguage)) {
+        article.summary = retried;
+        fixedAny = true;
+      }
+    }
+
+    if (fixedAny) {
+      repaired++;
+      // Save after every article, same incremental-save reasoning as
+      // normalizeTranslatedSources below.
+      await saveArticles(env, articles);
+    }
+  }
+
+  if (repaired > 0) {
+    console.log(`Repair: Fixed ${repaired} TRANSLATE_SOURCES article(s) stuck with untranslated native-script text.`);
+  }
+
+  return { articles, repaired };
 }
 
 // One-time-per-article migration for TRANSLATE_SOURCES: translates title,
@@ -233,6 +307,9 @@ async function runPipeline(env: Env): Promise<void> {
   console.log("Pipeline started...");
 
   let articles = await loadArticles(env);
+
+  console.log("Phase -2: Repairing any TRANSLATE_SOURCES articles stuck with untranslated text...");
+  ({ articles } = await repairStuckTranslations(env, articles));
 
   console.log("Phase -1: Normalizing any legacy non-English TRANSLATE_SOURCES articles...");
   ({ articles } = await normalizeTranslatedSources(env, articles));
