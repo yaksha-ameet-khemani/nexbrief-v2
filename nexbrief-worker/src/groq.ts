@@ -109,6 +109,32 @@ export async function summarize(env: Env, content: string, language: string): Pr
   return callGroqWithRetry(env, body);
 }
 
+// Used for translating non-English sources (see translate.ts) via the same
+// model as summarization (env.GROQ_API_MODEL, currently llama-3.3-70b-versatile)
+// rather than Cloudflare Workers AI's smaller 8B fallback model — a larger
+// model carries far more real-world knowledge of names/places, which matters
+// a lot for not mangling proper nouns in translation.
+export async function translateGroq(env: Env, text: string, sourceLang: string): Promise<string | null> {
+  const body = {
+    model: env.GROQ_API_MODEL,
+    temperature: 0.3,
+    messages: [
+      {
+        role: "system",
+        content:
+          `Translate the following ${sourceLang} text to English. Preserve names of people, places, ` +
+          "and organizations as accurately as possible. If you are not fully certain of the correct " +
+          "English spelling of a name, transliterate it phonetically from the original script rather " +
+          "than substituting a different real name or place you happen to recognize. Return only the " +
+          "translated text, with no notes, explanations, or quotation marks around it.",
+      },
+      { role: "user", content: text },
+    ],
+  };
+
+  return callGroqWithRetry(env, body);
+}
+
 export async function extractSearchQuery(
   env: Env,
   title: string,

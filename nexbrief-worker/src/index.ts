@@ -20,7 +20,7 @@ import {
   corsPreflight,
   CORS_HEADERS,
 } from "./api";
-import { translateToEnglish } from "./translate";
+import { translateWithFallback } from "./translate";
 import { summarizeWithCloudflare } from "./cfSummarize";
 import { MAX_ARTICLES_PER_SOURCE } from "./constants";
 
@@ -113,12 +113,17 @@ async function normalizeTranslatedSources(
   articles: Article[],
 ): Promise<{ articles: Article[]; migrated: number }> {
   let migrated = 0;
+  // Local to this phase — Phase 0/2/3 each track Groq's rate-limit state
+  // independently too (see processBacklog/runPipeline below), since each
+  // phase discovers it fresh from an actual 429 rather than assuming a
+  // limit hit in one phase still applies once the next hourly run starts.
+  const groqState = { rateLimited: false };
 
   for (const article of articles) {
     if (!TRANSLATE_SOURCES.has(article.source) || article.language === "en") continue;
 
     const originalLanguage = article.language;
-    const translatedTitle = await translateToEnglish(env, article.title, originalLanguage);
+    const translatedTitle = await translateWithFallback(env, article.title, originalLanguage, groqState);
     if (!translatedTitle) {
       // Title is always visible — if it fails to translate, leave the whole
       // article untouched (language stays non-"en") so a later run retries
@@ -130,19 +135,20 @@ async function normalizeTranslatedSources(
 
     if (article.description) {
       article.description =
-        (await translateToEnglish(env, article.description, originalLanguage)) ?? article.description;
+        (await translateWithFallback(env, article.description, originalLanguage, groqState)) ?? article.description;
     }
     if (article.rawContent) {
       article.rawContent =
-        (await translateToEnglish(
+        (await translateWithFallback(
           env,
           article.rawContent.slice(0, TRANSLATE_CONTENT_MAX_CHARS),
           originalLanguage,
+          groqState,
         )) ?? article.rawContent;
     }
     if (article.summary) {
       article.summary =
-        (await translateToEnglish(env, article.summary, originalLanguage)) ?? article.summary;
+        (await translateWithFallback(env, article.summary, originalLanguage, groqState)) ?? article.summary;
     }
 
     article.language = "en";
@@ -306,9 +312,9 @@ async function runPipeline(env: Env): Promise<void> {
     // summarizes in English directly (no native summary is ever produced, so
     // there's nothing left to translate afterward).
     if (TRANSLATE_SOURCES.has(raw.source) && language !== "en") {
-      const translatedTitle = await translateToEnglish(env, raw.title, raw.language);
+      const translatedTitle = await translateWithFallback(env, raw.title, raw.language, groqState);
       const translatedContent = content
-        ? await translateToEnglish(env, content.slice(0, TRANSLATE_CONTENT_MAX_CHARS), raw.language)
+        ? await translateWithFallback(env, content.slice(0, TRANSLATE_CONTENT_MAX_CHARS), raw.language, groqState)
         : null;
 
       // Only commit to English if every translation this article actually
@@ -318,7 +324,7 @@ async function runPipeline(env: Env): Promise<void> {
       if (translatedTitle && (!content || translatedContent)) {
         title = translatedTitle;
         if (description) {
-          description = (await translateToEnglish(env, description, raw.language)) ?? description;
+          description = (await translateWithFallback(env, description, raw.language, groqState)) ?? description;
         }
         if (translatedContent) content = translatedContent;
         language = "en";
