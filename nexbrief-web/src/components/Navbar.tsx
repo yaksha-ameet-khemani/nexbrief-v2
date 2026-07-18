@@ -28,8 +28,8 @@ export default function Navbar({
   const { increase, decrease, canIncrease, canDecrease } = useFontScale();
 
   return (
-    <nav className="bg-[#fffefa] text-[#1f1f1f] px-6 py-4 sticky top-0 z-50 border-b border-[#eaeaea]">
-      <div className="max-w-7xl mx-auto flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+    <nav className="bg-[#fffefa] text-[#1f1f1f] sticky top-0 z-50 border-b border-[#eaeaea]">
+      <div className="max-w-7xl mx-auto px-6 py-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl tracking-tight text-[#1f1f1f]">
             Nex<span className="text-[#cf412b]">Brief</span>
@@ -77,8 +77,10 @@ export default function Navbar({
           onChange={(e) => onKeywordChange(e.target.value)}
           className="bg-[#f5f5f5] text-[#1f1f1f] placeholder-[#6d6d6d] border border-[#eaeaea] rounded-lg px-4 py-2 w-full md:w-72 focus:outline-none focus:ring-2 focus:ring-[#cf412b]/40"
         />
+      </div>
 
-        <div className="flex gap-2 flex-wrap">
+      <div className="border-t border-[#eaeaea]">
+        <div className="max-w-7xl mx-auto px-6 py-3 flex gap-2 flex-wrap md:justify-center">
           {Object.entries(CATEGORY_LABELS).map(([val, label]) => (
             <button
               key={val}
