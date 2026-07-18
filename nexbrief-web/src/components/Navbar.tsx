@@ -1,18 +1,16 @@
 import { useFontScale } from "../hooks/useFontScale";
+import { SOURCE_LABELS } from "../types/Article";
 
-const CATEGORY_LABELS: Record<string, string> = {
+const SOURCE_NAV_LABELS: Record<string, string> = {
   "": "All",
-  cricket: "Cricket",
-  automobile: "Auto",
-  technology: "Tech",
-  general: "General",
+  ...SOURCE_LABELS,
 };
 
 interface NavbarProps {
   keyword: string;
   onKeywordChange: (val: string) => void;
-  selectedCategory: string;
-  onCategoryChange: (val: string) => void;
+  selectedSource: string;
+  onSourceChange: (val: string) => void;
   selectedDate: string;
   onDateChange: (val: string) => void;
 }
@@ -20,8 +18,8 @@ interface NavbarProps {
 export default function Navbar({
   keyword,
   onKeywordChange,
-  selectedCategory,
-  onCategoryChange,
+  selectedSource,
+  onSourceChange,
   selectedDate,
   onDateChange,
 }: NavbarProps) {
@@ -81,13 +79,13 @@ export default function Navbar({
 
       <div className="border-t border-[#eaeaea]">
         <div className="max-w-7xl mx-auto px-6 py-3 flex gap-2 flex-wrap md:justify-center">
-          {Object.entries(CATEGORY_LABELS).map(([val, label]) => (
+          {Object.entries(SOURCE_NAV_LABELS).map(([val, label]) => (
             <button
               key={val}
-              onClick={() => onCategoryChange(val)}
+              onClick={() => onSourceChange(val)}
               className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors
                 ${
-                  selectedCategory === val
+                  selectedSource === val
                     ? "bg-[#cf412b] text-white"
                     : "bg-[#f5f5f5] text-[#3d3d3d] hover:bg-[#eaeaea]"
                 }`}

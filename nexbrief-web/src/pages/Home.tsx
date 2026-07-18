@@ -9,7 +9,7 @@ import NewsCarousel from "../components/NewsCarousel";
 export default function Home() {
   const [articles, setArticles] = useState<Article[]>([]);
   const [keyword, setKeyword] = useState("");
-  const [selectedCategory, setCategory] = useState("");
+  const [selectedSource, setSource] = useState("");
   // Empty by default = show everything currently cached (the KV store only
   // ever retains ~5 days anyway), not just today. The date picker is an
   // opt-in filter, not a default constraint.
@@ -23,7 +23,7 @@ export default function Home() {
     try {
       const data = await fetchArticles({
         keyword: keyword || undefined,
-        category: selectedCategory || undefined,
+        source: selectedSource || undefined,
         date: selectedDate || undefined,
         size: 300,
       });
@@ -33,14 +33,14 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  }, [keyword, selectedCategory, selectedDate]);
+  }, [keyword, selectedSource, selectedDate]);
 
   useEffect(() => {
     const timer = setTimeout(() => loadArticles(), 500);
     return () => clearTimeout(timer);
   }, [loadArticles]);
 
-  const isBrowsing = !keyword && !selectedCategory;
+  const isBrowsing = !keyword && !selectedSource;
   const heroIds = new Set(isBrowsing ? pickHeroArticles(articles).map((a) => a.id) : []);
   const remaining = articles.filter((a) => !heroIds.has(a.id));
   const feedArticles = [...remaining].sort(
@@ -52,8 +52,8 @@ export default function Home() {
       <Navbar
         keyword={keyword}
         onKeywordChange={setKeyword}
-        selectedCategory={selectedCategory}
-        onCategoryChange={setCategory}
+        selectedSource={selectedSource}
+        onSourceChange={setSource}
         selectedDate={selectedDate}
         onDateChange={setDate}
       />
