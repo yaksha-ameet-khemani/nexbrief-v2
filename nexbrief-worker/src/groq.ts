@@ -3,7 +3,27 @@ import type { Env, GroqRateLimitInfo } from "./types";
 // Ported from AiSummaryService.callGroq + SearchLinkService (NexBrief Spring
 // Boot backend) — same prompts, same params, same 3-attempt backoff.
 
-export class RateLimitError extends Error {}
+// Base class for "Groq can't help us this run — stop calling it and route
+// the rest of this run's work through the Cloudflare fallback lane." Callers
+// check `instanceof GroqUnavailableError` so both subtypes below flip the
+// run's `groqState.rateLimited` flag identically.
+export class GroqUnavailableError extends Error {}
+
+// Groq's free-tier rate limit (HTTP 429). Retrying within the same run won't
+// clear it, so it's raised straight through callGroqWithRetry.
+export class RateLimitError extends GroqUnavailableError {}
+
+// Groq rejected the request itself — any 4xx that isn't 429: a missing /
+// invalid / revoked GROQ_API_KEY (401/403), a decommissioned or misspelled
+// model id (404 — this is what actually happened, llama-3.3-70b-versatile
+// was retired), or a malformed request (400). Retrying the identical call
+// won't fix any of these, and left un-fatal it's actively harmful: every
+// Groq call in the run burned 3 attempts + ~15s of backoff + 3 subrequests
+// on a guaranteed failure, until the Worker's subrequest budget was gone and
+// even the RSS fetch in Phase 1 failed — zero new articles for ~2 weeks.
+// Treated as fatal so the run drops straight to the Cloudflare lane. Only
+// 5xx / network errors still get retried. See STATUS.md.
+export class GroqRequestError extends GroqUnavailableError {}
 
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -56,7 +76,18 @@ async function callGroq(env: Env, body: unknown): Promise<string | null> {
     throw new RateLimitError(`Groq rate limit (429)`);
   }
   if (!res.ok) {
-    throw new Error(`Groq API HTTP error: ${res.status}`);
+    // Read a snippet of the error body for diagnostics (e.g. Groq's
+    // "model_decommissioned" / "model_not_found" code).
+    const detail = (await res.text().catch(() => "")).trim().slice(0, 200);
+    const suffix = detail ? `: ${detail}` : "";
+    // A 4xx that isn't 429 will never succeed on retry this run — raise it as
+    // fatal so callGroqWithRetry stops immediately and the caller switches
+    // the whole run to Cloudflare. 5xx / network errors fall through to the
+    // retry loop below.
+    if (res.status >= 400 && res.status < 500) {
+      throw new GroqRequestError(`Groq API HTTP error: ${res.status}${suffix}`);
+    }
+    throw new Error(`Groq API HTTP error: ${res.status}${suffix}`);
   }
 
   const json = (await res.json()) as any;
@@ -70,7 +101,7 @@ async function callGroqWithRetry(env: Env, body: unknown, maxRetries = 3): Promi
     try {
       return await callGroq(env, body);
     } catch (err) {
-      if (err instanceof RateLimitError) throw err; // propagate immediately, retrying won't help
+      if (err instanceof GroqUnavailableError) throw err; // 429, or a 4xx Groq rejected — retrying this run won't help
       attempt++;
       console.warn(`Groq: retry ${attempt}/${maxRetries} | Reason: ${(err as Error).message}`);
       if (attempt < maxRetries) {

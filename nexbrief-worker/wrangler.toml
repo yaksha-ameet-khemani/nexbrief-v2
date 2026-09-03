@@ -16,7 +16,13 @@ binding = "AI"
 
 [vars]
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_API_MODEL = "llama-3.3-70b-versatile"
+# llama-3.3-70b-versatile (the original choice, carried over from the Java
+# backend) was deprecated by Groq on 2026-06-17 and stopped being served in
+# Aug 2026 — every call started 404ing, which silently wedged the whole
+# pipeline (see STATUS.md). openai/gpt-oss-120b is Groq's own recommended
+# migration target: a production-tier model, large enough to keep the
+# proper-noun accuracy the BBC Urdu translation path depends on.
+GROQ_API_MODEL = "openai/gpt-oss-120b"
 
 # Secrets (never stored in this file — set via `wrangler secret put <NAME>`):
 #   GROQ_API_KEY     - Groq API key

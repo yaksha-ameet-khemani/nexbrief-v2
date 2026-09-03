@@ -5,7 +5,7 @@ import {
   summarize,
   extractSearchQuery,
   buildLinks,
-  RateLimitError,
+  GroqUnavailableError,
   sleep,
   RATE_LIMIT_PACING_MS,
   getLastRateLimitInfo,
@@ -88,7 +88,10 @@ async function summarizeWithFallback(
       const summary = await summarize(env, content, language);
       if (summary) return { summary, summarizedBy: "groq" };
     } catch (err) {
-      if (err instanceof RateLimitError) {
+      if (err instanceof GroqUnavailableError) {
+        // 429, or a 4xx Groq rejected (bad key / retired model) — stop using
+        // Groq for the rest of this run; every later article skips straight
+        // to the Cloudflare lane.
         groqState.rateLimited = true;
       } else {
         console.error(`Summarize: Groq error | ${(err as Error).message}`);
@@ -299,20 +302,27 @@ export default {
   },
 };
 
-// Mirrors FetchScheduler.runPipeline(): Phase 0 completes any backlog left
-// unsummarized by a previous rate-limited run, Phase 1 fetches new RSS
-// entries, and Phase 2/3 scrape + summarize each new article in turn
-// (combined into one pass here since there's no database to stage them in).
+// Loosely mirrors FetchScheduler.runPipeline() from the old Java backend,
+// but the phases DON'T run in numeric order: Phase 1 (fetch new RSS items)
+// runs FIRST, ahead of the translation-repair / normalize / backlog phases.
+//
+// Why: those phases make Groq/Cloudflare AI calls, and a Cloudflare Worker
+// invocation has a hard cap on outbound subrequests (plus a wall-clock
+// budget). A stale GROQ_API_KEY once made every AI call fail, the repair
+// phase retried them until the subrequest budget was gone, and Phase 1 —
+// last in line — never got to fetch the feeds at all: zero new articles were
+// discovered for ~2 weeks while the run still looked healthy. Fetching the
+// feeds before any AI work runs guarantees new articles are always captured
+// (they save as pending and get summarized on a later run regardless).
+//
+// Tradeoff: each source's fetch budget is now derived from its pending count
+// *before* Phase 0 clears any backlog, so a source cleared this run doesn't
+// regain its fuller budget until the next run (was previously recomputed
+// post-backlog). Minor — the throttle only needs to be roughly right.
 async function runPipeline(env: Env): Promise<void> {
   console.log("Pipeline started...");
 
   let articles = await loadArticles(env);
-
-  console.log("Phase -2: Repairing any TRANSLATE_SOURCES articles stuck with untranslated text...");
-  ({ articles } = await repairStuckTranslations(env, articles));
-
-  console.log("Phase -1: Normalizing any legacy non-English TRANSLATE_SOURCES articles...");
-  ({ articles } = await normalizeTranslatedSources(env, articles));
 
   const sourceConfig = await loadSourceConfig(env);
   const disabledSources = new Set(sourceConfig.disabledSources);
@@ -320,22 +330,12 @@ async function runPipeline(env: Env): Promise<void> {
     console.log(`Pipeline: Skipping disabled sources this run: ${[...disabledSources].join(", ")}`);
   }
 
-  console.log("Phase 0: Completing pending backlog summaries...");
-  const backlogResult = await processBacklog(env, articles, disabledSources);
-  articles = backlogResult.articles;
-  if (backlogResult.rateLimited) {
-    console.warn("Phase 0: Groq rate limit hit during backlog processing; remaining backlog was routed through Cloudflare Workers AI where possible.");
-  } else {
-    console.log("Phase 0: Backlog phase complete.");
-  }
-
   // Each source's fetch budget for this run shrinks by however many
   // articles it already has waiting on a summary — a source with 2 pending
   // only pulls 3 new ones, a source at or past the full per-run cap pulls
-  // zero. Recomputed after Phase 0 so a source that just got cleared back
-  // down gets its budget back immediately, same run. Prevents any single
-  // source's backlog from snowballing into "a mountain" while quiet sources
-  // keep fetching at full pace, instead of the old hard on/off cutoff.
+  // zero. Prevents any single source's backlog from snowballing into "a
+  // mountain" while quiet sources keep fetching at full pace, instead of the
+  // old hard on/off cutoff.
   const pendingCounts = new Map<string, number>();
   for (const a of articles) {
     if (a.summary == null) pendingCounts.set(a.source, (pendingCounts.get(a.source) ?? 0) + 1);
@@ -353,10 +353,28 @@ async function runPipeline(env: Env): Promise<void> {
     );
   }
 
+  // Phase 1 first — see the ordering note above runPipeline. Only the RSS
+  // fetch is hoisted; the fetched items are scraped/summarized further down
+  // in Phase 2+3, after the AI-heavy repair/normalize/backlog phases.
   console.log("Phase 1: Fetching RSS...");
   const existingUrls = existingUrlSet(articles);
   const newRaw = interleaveBySource(await fetchAllFeeds(existingUrls, disabledSources, fetchLimits));
   console.log(`Phase 1: Completed. ${newRaw.length} new articles found.`);
+
+  console.log("Phase -2: Repairing any TRANSLATE_SOURCES articles stuck with untranslated text...");
+  ({ articles } = await repairStuckTranslations(env, articles));
+
+  console.log("Phase -1: Normalizing any legacy non-English TRANSLATE_SOURCES articles...");
+  ({ articles } = await normalizeTranslatedSources(env, articles));
+
+  console.log("Phase 0: Completing pending backlog summaries...");
+  const backlogResult = await processBacklog(env, articles, disabledSources);
+  articles = backlogResult.articles;
+  if (backlogResult.rateLimited) {
+    console.warn("Phase 0: Groq rate limit hit during backlog processing; remaining backlog was routed through Cloudflare Workers AI where possible.");
+  } else {
+    console.log("Phase 0: Backlog phase complete.");
+  }
 
   console.log("Phase 2 + 3: Extracting content and summarizing new articles...");
   const newArticles: Article[] = [];
@@ -425,7 +443,7 @@ async function runPipeline(env: Env): Promise<void> {
       if (summary) {
         await sleep(RATE_LIMIT_PACING_MS); // pace before the (always-Groq) search-query call
         const query = await extractSearchQuery(env, title, summary).catch((err) => {
-          if (!(err instanceof RateLimitError)) {
+          if (!(err instanceof GroqUnavailableError)) {
             console.error(`SearchLink: Error | title=${title} | ${(err as Error).message}`);
           }
           return null;
@@ -521,7 +539,7 @@ async function processBacklog(
         article.summarizedBy = summarizedBy;
         await sleep(RATE_LIMIT_PACING_MS); // pace before the (always-Groq) search-query call
         const query = await extractSearchQuery(env, article.title, summary).catch((err) => {
-          if (!(err instanceof RateLimitError)) {
+          if (!(err instanceof GroqUnavailableError)) {
             console.error(`Phase 0 SearchLink: Error | title=${article.title} | ${(err as Error).message}`);
           }
           return null;

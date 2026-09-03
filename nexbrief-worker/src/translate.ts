@@ -1,5 +1,5 @@
 import type { Env } from "./types";
-import { translateGroq, RateLimitError } from "./groq";
+import { translateGroq, GroqUnavailableError } from "./groq";
 
 // Cloudflare Workers AI fallback model — much smaller (8B) than Groq's
 // translateGroq model (see groq.ts's GROQ_API_MODEL, currently
@@ -63,8 +63,10 @@ async function translateWithCloudflare(env: Env, text: string, sourceLang: strin
 // real-world knowledge of names/places than Cloudflare's 8B fallback model,
 // which regularly mangled proper nouns (e.g. "Mohammad Nawaz" -> "Mohammed
 // Nasr", "Strait of Hormuz" -> "Horus"). Falls back to Cloudflare Workers AI
-// once Groq's rate limit is hit this run, mirroring summarizeWithFallback in
-// index.ts. `groqState` is shared with summarization within the same
+// once Groq is unavailable for the run — its rate limit is hit (429) or it
+// rejects the request with a 4xx (bad key, retired model) — mirroring
+// summarizeWithFallback in index.ts.
+// `groqState` is shared with summarization within the same
 // pipeline run so both lanes agree on whether Groq is still available,
 // rather than each rediscovering the same 429 independently.
 export async function translateWithFallback(
@@ -84,7 +86,10 @@ export async function translateWithFallback(
         console.warn(`Translate: Groq returned untranslated/mixed-script text, falling back | language=${language}`);
       }
     } catch (err) {
-      if (err instanceof RateLimitError) {
+      if (err instanceof GroqUnavailableError) {
+        // 429, or a 4xx Groq rejected (bad key / retired model) — stop using
+        // Groq for the rest of this run and fall through to Cloudflare for
+        // every later call too.
         groqState.rateLimited = true;
       } else {
         console.error(`Translate: Groq error | ${(err as Error).message}`);
