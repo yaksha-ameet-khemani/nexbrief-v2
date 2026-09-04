@@ -1,5 +1,5 @@
 import type { Article, Env } from "./types";
-import { fetchAllFeeds, SOURCE_LANGUAGES } from "./feeds";
+import { fetchAllFeeds, SOURCE_LANGUAGES, canonicalizeUrl } from "./feeds";
 import { scrapeArticle, EXTRACTION_FAILED } from "./scrape";
 import {
   summarize,
@@ -62,6 +62,58 @@ function interleaveBySource<T extends { source: string }>(items: T[]): T[] {
     }
   }
   return result;
+}
+
+// Collapses Dainik Bhaskar "/g/" URL-variant duplicates that are already
+// sitting in the store (see canonicalizeUrl in feeds.ts for the root cause):
+// the feed served the same story under two path forms on different runs, and
+// the old exact-string dedup let the second form in as a fresh article with
+// its own UUID. Runs every pipeline invocation — it's a cheap in-memory
+// group-and-filter with no AI calls, so it also acts as an ongoing safety
+// net if the feed ever produces a new pair before Phase 1's dedup catches
+// it. Strictly bhaskar-scoped; every other source's articles pass straight
+// through untouched. Array order isn't preserved, which is fine — every
+// downstream reader (saveArticles, /api/articles, /api/status) re-sorts.
+function dedupeBhaskarArticles(articles: Article[]): {
+  articles: Article[];
+  removed: number;
+  changed: boolean;
+} {
+  const kept: Article[] = [];
+  const byCanonical = new Map<string, Article>();
+  let bhaskarTotal = 0;
+  let urlRewrites = 0;
+
+  for (const article of articles) {
+    if (article.source !== "bhaskar") {
+      kept.push(article);
+      continue;
+    }
+    bhaskarTotal++;
+    const canonicalUrl = canonicalizeUrl(article.url, "bhaskar");
+    if (canonicalUrl !== article.url) urlRewrites++;
+    const normalized = canonicalUrl === article.url ? article : { ...article, url: canonicalUrl };
+
+    const existing = byCanonical.get(canonicalUrl);
+    if (!existing || isMoreComplete(normalized, existing)) {
+      byCanonical.set(canonicalUrl, normalized);
+    }
+  }
+
+  kept.push(...byCanonical.values());
+  const removed = bhaskarTotal - byCanonical.size;
+  return { articles: kept, removed, changed: removed > 0 || urlRewrites > 0 };
+}
+
+// Which of two copies of the same story to keep: a finished AI summary beats
+// a still-pending one; between two of equal completeness, the earlier
+// createdAt wins — it's the copy the site has already been showing, and its
+// links / searchQuery are populated.
+function isMoreComplete(candidate: Article, incumbent: Article): boolean {
+  const candidateDone = candidate.summary != null;
+  const incumbentDone = incumbent.summary != null;
+  if (candidateDone !== incumbentDone) return candidateDone;
+  return new Date(candidate.createdAt).getTime() < new Date(incumbent.createdAt).getTime();
 }
 
 interface SummarizeResult {
@@ -323,6 +375,18 @@ async function runPipeline(env: Env): Promise<void> {
   console.log("Pipeline started...");
 
   let articles = await loadArticles(env);
+
+  // Collapse any Dainik Bhaskar "/g/"-variant duplicates already in the
+  // store before anything else looks at the article list (fetch-dedup,
+  // backlog, throttle math all downstream of this). Cheap, no AI calls.
+  const bhaskarDedup = dedupeBhaskarArticles(articles);
+  if (bhaskarDedup.changed) {
+    articles = bhaskarDedup.articles;
+    await saveArticles(env, articles);
+    console.log(
+      `Dedup: Collapsed ${bhaskarDedup.removed} duplicate Dainik Bhaskar "/g/"-variant article(s).`,
+    );
+  }
 
   const sourceConfig = await loadSourceConfig(env);
   const disabledSources = new Set(sourceConfig.disabledSources);

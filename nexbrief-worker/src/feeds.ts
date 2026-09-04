@@ -45,6 +45,20 @@ const parser = new XMLParser({
   textNodeName: "#text",
 });
 
+// Dainik Bhaskar's RSS feed serves the same story under two path forms that
+// differ only by a "/g/" segment right after the host — e.g.
+//   https://www.bhaskar.com/national/news/…-138922306.html
+//   https://www.bhaskar.com/g/national/news/…-138922306.html
+// It flips between the two forms from one hourly run to the next, so an
+// exact-string dedup check (existingUrlSet) sees the second form as a
+// brand-new article and re-scrapes/re-summarizes it. Collapsing the "/g/"
+// segment maps both forms to one canonical URL. Deliberately bhaskar-only —
+// every other source emits stable canonical URLs and must be left untouched.
+export function canonicalizeUrl(url: string, source: string): string {
+  if (source !== "bhaskar") return url;
+  return url.replace(/^(https?:\/\/[^/]+)\/g\//, "$1/");
+}
+
 function stripHtml(input: string): string {
   return input
     .replace(/<[^>]*>/g, "")
@@ -125,8 +139,13 @@ async function fetchFeed(
   for (const item of items) {
     if (results.length >= limit) break;
 
-    const url = extractUrl(item);
-    if (!url || existingUrls.has(url)) continue;
+    const rawUrl = extractUrl(item);
+    if (!rawUrl) continue;
+    // Compare and store the canonical form so bhaskar's "/g/" URL variants
+    // dedup against each other (canonicalizeUrl is a no-op for every other
+    // source, so their URLs are untouched).
+    const url = canonicalizeUrl(rawUrl, meta.source);
+    if (existingUrls.has(url)) continue;
 
     const description = textOf(item.description);
 

@@ -1,4 +1,5 @@
 import type { Article, Env, PipelineMeta, SourceConfig } from "./types";
+import { canonicalizeUrl } from "./feeds";
 
 const KV_KEY = "articles";
 const META_KEY = "meta";
@@ -24,7 +25,9 @@ export async function saveArticles(env: Env, articles: Article[]): Promise<void>
 }
 
 export function existingUrlSet(articles: Article[]): Set<string> {
-  return new Set(articles.map((a) => a.url));
+  // Canonicalized so a stored bhaskar "/g/" URL still matches the plain form
+  // (and vice-versa) coming off the feed next run — no-op for other sources.
+  return new Set(articles.map((a) => canonicalizeUrl(a.url, a.source)));
 }
 
 // Wipes every stored article — summarized and pending alike. Leaves

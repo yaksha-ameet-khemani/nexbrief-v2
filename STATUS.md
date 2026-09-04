@@ -1,6 +1,6 @@
 # NexBrief-v2 — Status
 
-Last updated: 2026-09-03
+Last updated: 2026-09-04
 
 ## What this is
 
@@ -301,6 +301,31 @@ architecture plan agreed before building.
   "the call returned" ≠ "the call did what I asked", and a health signal
   that only proves the run *ended* — not that it *did anything* — hides
   exactly this class of failure.**
+- **(2026-09-04) Dedup is now canonical-URL-based for Dainik Bhaskar only.**
+  Bhaskar's RSS feed serves the same story under two path forms that differ
+  only by a `/g/` segment right after the host
+  (`bhaskar.com/national/news/…-<id>.html` vs
+  `bhaskar.com/g/national/news/…-<id>.html`) and flips between them from one
+  hourly run to the next. The dedup check (`existingUrlSet` in `store.ts`,
+  consumed by `fetchFeed` in `feeds.ts`) was an exact string match, so the
+  second form came in as a brand-new article with its own UUID — re-scraped
+  and re-summarized (burning a second Groq/Cloudflare call), then both copies
+  showed on the site. Found 6 duplicate pairs live. Fix (all bhaskar-scoped,
+  every other source untouched — they emit stable canonical URLs):
+  - **`canonicalizeUrl(url, source)` in `feeds.ts`** strips a leading `/g/`
+    path segment; a no-op unless `source === "bhaskar"`. `fetchFeed` now
+    compares and *stores* the canonical form; `existingUrlSet` canonicalizes
+    each stored URL when building the lookup set, so a stored `/g/` URL still
+    matches the plain form off the feed and vice-versa.
+  - **`dedupeBhaskarArticles()` in `index.ts`** runs at the top of every
+    `runPipeline` (before fetch-dedup / backlog / throttle math). Cheap
+    in-memory group-by-canonical-URL, no AI calls: collapses existing `/g/`
+    duplicate pairs, keeping the more complete copy (finished summary beats
+    pending; else earlier `createdAt` — the one the site's been showing, with
+    `links`/`searchQuery` populated) and rewriting survivors' URLs to
+    canonical. Saves only when something changed. Doubles as an ongoing
+    safety net if the feed ever produces a new pair before Phase 1 sees it.
+    Array order isn't preserved — fine, every downstream reader re-sorts.
 
 ## Open questions / paused work
 
