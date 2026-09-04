@@ -22,6 +22,7 @@ For current live operational status (what's deployed, where, and known limitatio
 - 🔗 Auto-generated, category-aware "search this elsewhere" links (Cricbuzz/ESPNCricinfo for cricket, TechCrunch/The Verge for tech, etc.)
 - 🔄 Fully automatic hourly refresh — no manual intervention, no visitor-triggered fetching
 - 🚦 Per-source fetch throttle: a source's new-article intake tapers off smoothly as its own unsummarized backlog grows, and recovers on its own as the backlog clears — plus an admin-only manual enable/disable toggle per source and a "clear all articles" reset, both surfaced on `/status`
+- 🧹 De-duplication survives Dainik Bhaskar serving the same story under two URL forms (with/without a `/g/` path segment) that its feed alternates between run to run — Bhaskar URLs are canonicalised before the "already have this?" check, and a cleanup pass collapses any pairs that slipped through earlier
 - 📊 A `/status` page showing pipeline health: article counts (with a %-pending column per source), last/next run time, Groq quota remaining, which AI lane (Groq/Cloudflare) is summarizing, and source-level admin controls
 - 🗂️ Filter by date, category, source, or keyword search
 - 💸 Runs entirely on free-tier cloud infrastructure — no database, no always-on server
